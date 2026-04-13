@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash build.sh*)",
+      "Bash(bash install.sh*)",
+      "Bash(cmake --build build*)",
+      "Bash(cmake --install build*)",
+      "Bash(./build/demo_basic*)",
+      "Bash(clang-format*)",
+      "Bash(git *)",
+      "Bash(cd share/scripts && python export_onnx.py*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)*",
+      "Bash(git push --force*)"
+    ]
+  }
+}
