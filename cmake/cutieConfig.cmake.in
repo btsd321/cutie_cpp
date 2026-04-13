@@ -1,0 +1,25 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# 必需依赖
+find_dependency(OpenCV REQUIRED)
+find_dependency(CUDAToolkit REQUIRED)
+
+# 可选后端依赖
+if(@ENABLE_ONNXRUNTIME@)
+    find_dependency(onnxruntime CONFIG QUIET)
+    if(NOT onnxruntime_FOUND)
+        # 回退：自定义 Find 模块
+        find_dependency(ONNXRuntime REQUIRED)
+    endif()
+endif()
+
+if(@ENABLE_TENSORRT@)
+    find_dependency(TensorRT REQUIRED)
+endif()
+
+# 导入 targets
+include("${CMAKE_CURRENT_LIST_DIR}/cutieTargets.cmake")
+
+check_required_components(cutie)

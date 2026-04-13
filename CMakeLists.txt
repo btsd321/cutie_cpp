@@ -234,6 +234,27 @@ install(EXPORT cutieTargets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cutie
 )
 
+# === CMake 包配置文件生成 ===
+include(CMakePackageConfigHelpers)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cutieConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/cutieConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/cutie"
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/cutieConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/cutieConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/cutieConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/cutie"
+)
+
 # === 模型文件安装（.pth 权重 + 任意已导出的 .onnx 子模块）===
 # OPTIONAL: 若 share/model/ 为空或不存在也不报错
 install(DIRECTORY "${CUTIE_MODEL_SOURCE_DIR}/"
