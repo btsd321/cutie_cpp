@@ -25,9 +25,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Add the Cutie project root to path
-CUTIE_ROOT = os.path.join(os.path.dirname(__file__), '..', '..', '.ref_project', 'Cutie')
-sys.path.insert(0, CUTIE_ROOT)
+# 从已安装的 cutie 包获取路径（支持 venv 安装）
+import importlib.util as _ilu
+_cutie_spec = _ilu.find_spec('cutie')
+if _cutie_spec is None:
+    raise ImportError("cutie 包未找到，请先在当前 Python 环境中安装 cutie（pip install -e .ref_project/Cutie）")
+CUTIE_ROOT = os.path.dirname(_cutie_spec.submodule_search_locations[0])
 
 from cutie.model.cutie import CUTIE
 from omegaconf import OmegaConf
