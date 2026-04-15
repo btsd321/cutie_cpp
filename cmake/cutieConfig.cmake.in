@@ -8,10 +8,13 @@ find_dependency(CUDAToolkit REQUIRED)
 
 # 可选后端依赖
 if(@ENABLE_ONNXRUNTIME@)
-    find_dependency(onnxruntime CONFIG QUIET)
-    if(NOT onnxruntime_FOUND)
-        # 回退：自定义 Find 模块
-        find_dependency(ONNXRuntime REQUIRED)
+    # 用 NOT TARGET 保护，避免重复调用导致 onnxruntimeConfig.cmake 重复创建 safeint_interface
+    if(NOT TARGET onnxruntime::onnxruntime)
+        find_dependency(onnxruntime CONFIG QUIET)
+        if(NOT onnxruntime_FOUND)
+            # 回退：自定义 Find 模块
+            find_dependency(ONNXRuntime REQUIRED)
+        endif()
     endif()
 endif()
 
