@@ -1,12 +1,44 @@
 #include <cstring>
 #include <stdexcept>
 
+#include <cuda_runtime.h>
+
 #include "cutie/core/inference_core.h"
 #include "cutie/core/processor.h"
+#include "cutie/ort/core/gpu_memory.h"
 #include "cutie/utils.h"
 
 namespace cutie
 {
+
+// ── GpuCutieMask::download ──────────────────────────────────────────
+
+types::CutieMask types::GpuCutieMask::download() const
+{
+    using GA = ortcore::GpuMemoryAllocator;
+
+    types::CutieMask result;
+    result.object_ids = object_ids;
+    result.flag = flag;
+
+    if (!index_mask.empty())
+    {
+        index_mask.download(result.index_mask);
+    }
+
+    if (gpu_prob.IsTensor())
+    {
+        auto s = GA::shape(gpu_prob);
+        int64_t total = GA::numel(s);
+        std::vector<int> cv_sizes(s.begin(), s.end());
+        result.prob = cv::Mat(static_cast<int>(cv_sizes.size()), cv_sizes.data(), CV_32FC1);
+        cudaMemcpy(result.prob.ptr<float>(), GA::data_ptr(gpu_prob), total * sizeof(float),
+                   cudaMemcpyDeviceToHost);
+    }
+
+    return result;
+}
+
 namespace core
 {
 
@@ -114,6 +146,53 @@ types::CutieMask CutieProcessor::step(const cv::Mat& image, const cv::Mat& mask,
     }
 
     return result;
+}
+
+// ── GPU step ────────────────────────────────────────────────────────
+
+types::GpuCutieMask CutieProcessor::step_gpu(const cv::cuda::GpuMat& gpu_image,
+                                             const cv::cuda::GpuMat& gpu_mask,
+                                             const std::vector<ObjectId>& objects)
+{
+    StepOptions opts;
+    return step_gpu(gpu_image, gpu_mask, objects, opts);
+}
+
+types::GpuCutieMask CutieProcessor::step_gpu(const cv::cuda::GpuMat& gpu_image,
+                                             const cv::cuda::GpuMat& gpu_mask,
+                                             const std::vector<ObjectId>& objects,
+                                             const StepOptions& options)
+{
+    cv::cuda::GpuMat input_mask = gpu_mask;
+    std::vector<ObjectId> obj_ids = objects;
+
+    // GPU mask type 转换（如需要）
+    if (!gpu_mask.empty() && options.idx_mask && gpu_mask.type() != CV_32SC1)
+    {
+        gpu_mask.convertTo(input_mask, CV_32SC1);
+    }
+
+    return impl_->core.step_gpu(gpu_image, input_mask, obj_ids, options.end,
+                                options.force_permanent);
+}
+
+types::GpuCutieMask CutieProcessor::step_gpu(const cv::Mat& image, const cv::Mat& mask,
+                                             const std::vector<ObjectId>& objects)
+{
+    // 自动上传到 GPU
+    cv::cuda::GpuMat gpu_image;
+    gpu_image.upload(image);
+
+    cv::cuda::GpuMat gpu_mask;
+    if (!mask.empty())
+    {
+        cv::Mat mask_i32 = mask;
+        if (mask_i32.type() != CV_32SC1) mask.convertTo(mask_i32, CV_32SC1);
+        gpu_mask.upload(mask_i32);
+    }
+
+    StepOptions opts;
+    return step_gpu(gpu_image, gpu_mask, objects, opts);
 }
 
 void CutieProcessor::delete_objects(const std::vector<ObjectId>& objects)

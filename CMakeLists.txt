@@ -122,9 +122,13 @@ if(ENABLE_ONNXRUNTIME)
     list(APPEND CUTIE_ORT_SOURCES
         src/ort/core/ort_handler.cpp
         src/ort/core/ort_utils.cpp
+        src/ort/core/gpu_buffer.cpp
         src/ort/core/gpu_memory.cpp
         src/ort/core/gpu_tensor_ops.cpp
         src/ort/core/cuda_kernels.cu
+        src/ort/core/gpu_image_preprocess.cu
+        src/ort/core/gpu_postprocess.cu
+        src/ort/core/gpu_mask_preprocess.cu
         src/ort/cv/ort_cutie.cpp
     )
 endif()

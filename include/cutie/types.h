@@ -5,6 +5,9 @@
 #include <vector>
 
 #include <opencv2/core.hpp>
+#include <opencv2/core/cuda.hpp>
+
+#include "cutie/ort/core/ort_config.h"  // Ort::Value
 
 namespace cutie
 {
@@ -38,6 +41,20 @@ struct CutieMask
         : index_mask(std::move(idx_mask)), object_ids(std::move(ids)), flag(true)
     {
     }
+};
+
+/// GPU 推理输出：全部数据留在 GPU 上，按需 download 到 CPU。
+struct GpuCutieMask
+{
+    cv::cuda::GpuMat index_mask;       ///< GPU: H×W, CV_32SC1, pixel=ObjectId (0=bg)
+    std::vector<ObjectId> object_ids;  ///< CPU: active object list
+    Ort::Value gpu_prob{nullptr};      ///< GPU: [num_obj+1, H, W] float32 概率图
+    bool flag = false;
+
+    GpuCutieMask() = default;
+
+    /// 按需下载到 CPU CutieMask。
+    CutieMask download() const;
 };
 
 }  // namespace types

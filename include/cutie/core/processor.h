@@ -7,6 +7,7 @@
 
 #include <linden_logger/logger_interface.hpp>
 #include <opencv2/core.hpp>
+#include <opencv2/core/cuda.hpp>
 
 #include "cutie/types.h"
 
@@ -87,12 +88,27 @@ public:
     CutieProcessor(CutieProcessor&&) noexcept;
     CutieProcessor& operator=(CutieProcessor&&) noexcept;
 
-    // Core inference
+    // Core inference (CPU 接口)
     types::CutieMask step(const cv::Mat& image, const cv::Mat& mask = cv::Mat(),
                           const std::vector<ObjectId>& objects = {});
 
     types::CutieMask step(const cv::Mat& image, const cv::Mat& mask,
                           const std::vector<ObjectId>& objects, const StepOptions& options);
+
+    // GPU inference (全 GPU 路径)
+    /// GPU 推理：GpuMat 输入 → GpuCutieMask 输出，中间无 CPU 回退。
+    types::GpuCutieMask step_gpu(const cv::cuda::GpuMat& gpu_image,
+                                 const cv::cuda::GpuMat& gpu_mask = cv::cuda::GpuMat(),
+                                 const std::vector<ObjectId>& objects = {});
+
+    types::GpuCutieMask step_gpu(const cv::cuda::GpuMat& gpu_image,
+                                 const cv::cuda::GpuMat& gpu_mask,
+                                 const std::vector<ObjectId>& objects,
+                                 const StepOptions& options);
+
+    /// GPU 推理：CPU 图像 → 自动上传 → GpuCutieMask 输出。
+    types::GpuCutieMask step_gpu(const cv::Mat& image, const cv::Mat& mask = cv::Mat(),
+                                 const std::vector<ObjectId>& objects = {});
 
     // Object management
     void delete_objects(const std::vector<ObjectId>& objects);

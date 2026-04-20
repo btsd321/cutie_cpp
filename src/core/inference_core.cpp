@@ -6,6 +6,9 @@
 #include "cutie/core/object_manager.h"
 #include "cutie/core/processor.h"
 #include "cutie/ort/core/cuda_kernels.h"
+#include "cutie/ort/core/gpu_image_preprocess.h"
+#include "cutie/ort/core/gpu_mask_preprocess.h"
+#include "cutie/ort/core/gpu_postprocess.h"
 #include "cutie/ort/core/gpu_tensor_ops.h"
 #include "cutie/utils.h"
 
@@ -51,12 +54,19 @@ struct InferenceCore::Impl
     ObjectManager object_manager;
     std::unique_ptr<MemoryManager> memory;
     ImageFeatureStore feature_store;
+    ortcore::GpuImagePreprocessor gpu_preprocessor;
 
 #ifdef ENABLE_ONNXRUNTIME
     std::unique_ptr<ortcv::OrtCutie> network;
 #endif
 
     explicit Impl(const CutieConfig& config, std::shared_ptr<linden::log::ILogger> logger_ptr);
+
+    /// GPU 推理核心路径（step 和 step_gpu 共用）。
+    types::GpuCutieMask step_gpu_impl(const cv::cuda::GpuMat& gpu_image,
+                                      const cv::cuda::GpuMat& gpu_mask,
+                                      const std::vector<ObjectId>& objects, bool end,
+                                      bool force_permanent);
 
     cv::Mat step(const cv::Mat& image, const cv::Mat& mask, const std::vector<ObjectId>& objects,
                  bool end, bool force_permanent);
@@ -273,16 +283,17 @@ void InferenceCore::Impl::add_memory(ImageFeatureStore::CachedFeatures& feat, Or
 #endif
 }
 
-// ── step ────────────────────────────────────────────────────────────
+// ── step_gpu_impl（GPU 推理核心路径）──────────────────────────────────
 
-cv::Mat InferenceCore::Impl::step(const cv::Mat& image, const cv::Mat& mask,
-                                  const std::vector<ObjectId>& objects, bool end,
-                                  bool force_permanent)
+types::GpuCutieMask InferenceCore::Impl::step_gpu_impl(const cv::cuda::GpuMat& gpu_image,
+                                                        const cv::cuda::GpuMat& gpu_mask,
+                                                        const std::vector<ObjectId>& objects,
+                                                        bool end, bool force_permanent)
 {
     curr_ti++;
 
-    int orig_h = image.rows;
-    int orig_w = image.cols;
+    int orig_h = gpu_image.rows;
+    int orig_w = gpu_image.cols;
 
     // 当 ONNX 为动态分辨率时，model_h_/model_w_ 为 0（dim 值 -1）。
     // 此时使用 max_internal_size 计算目标尺寸（与 Python 版行为一致：短边超出则等比缩放）。
@@ -311,22 +322,16 @@ cv::Mat InferenceCore::Impl::step(const cv::Mat& image, const cv::Mat& mask,
 #ifdef ENABLE_ONNXRUNTIME
     auto& alloc = network->gpu_alloc();
 
-    // GPU 预处理：BGR uint8 → RGB float32 [1,3,padH,padW] + pad
-    auto [image_gpu, pad_out] = alloc.preprocess_image_gpu(image, target_h, target_w);
+    // ① 融合 GPU 预处理：单 kernel 完成 resize + pad + BGR→RGB + norm + CHW
+    auto [image_gpu_val, pad_out] = gpu_preprocessor.preprocess(gpu_image, target_h, target_w,
+                                                                 alloc);
     pad = pad_out;
-    cached_image_gpu = std::move(image_gpu);
+    cached_image_gpu = std::move(image_gpu_val);
 #endif
 
-    // Mask 预处理（CPU，因为 mask 是稀疏整数标签）
-    cv::Mat proc_mask = mask;
-    if (!mask.empty() && resize_needed)
-    {
-        cv::resize(mask, proc_mask, cv::Size(target_w, target_h), 0, 0, cv::INTER_NEAREST);
-    }
-
-    bool is_mem_frame = ((curr_ti - last_mem_ti >= mem_every) || !mask.empty()) && !end;
+    bool is_mem_frame = ((curr_ti - last_mem_ti >= mem_every) || !gpu_mask.empty()) && !end;
     bool need_segment =
-        mask.empty() || (object_manager.num_obj() > 0 && !object_manager.has_all(objects));
+        gpu_mask.empty() || (object_manager.num_obj() > 0 && !object_manager.has_all(objects));
     int stagger_delta = curr_ti - last_mem_ti;
     bool update_sensory = stagger_ti.count(stagger_delta) > 0 && !end;
 
@@ -340,33 +345,30 @@ cv::Mat InferenceCore::Impl::step(const cv::Mat& image, const cv::Mat& mask,
         pred_prob_with_bg = segment(feat, update_sensory);
     }
 
-    // Handle input mask
-    if (!proc_mask.empty())
+    // ② Handle input mask（全 GPU 路径）
+    if (!gpu_mask.empty())
     {
         auto [tmp_ids, new_ids] = object_manager.add_new_objects(objects);
 
-        // Pad mask
-        cv::Mat padded_mask = proc_mask;
-        if (padded_mask.type() != CV_32SC1)
-            proc_mask.convertTo(padded_mask, CV_32SC1);
-        if (pad[0] > 0 || pad[1] > 0 || pad[2] > 0 || pad[3] > 0)
+        // GPU resize mask (nearest)
+        cv::cuda::GpuMat resized_mask = gpu_mask;
+        if (resize_needed)
         {
-            cv::copyMakeBorder(padded_mask, padded_mask, pad[0], pad[1], pad[2], pad[3],
-                               cv::BORDER_CONSTANT, cv::Scalar(0));
+            resized_mask = ortcore::gpu_resize_mask_nearest(gpu_mask, target_h, target_w);
         }
+
+        // GPU pad mask
+        cv::cuda::GpuMat padded_mask = ortcore::gpu_pad_mask(resized_mask, pad);
 
         int H = padded_mask.rows;
         int W = padded_mask.cols;
         int HW = H * W;
 
 #ifdef ENABLE_ONNXRUNTIME
-        // 上传 padded_mask 和 objects 到 GPU
-        int32_t* d_mask = nullptr;
-        cudaMalloc(&d_mask, HW * sizeof(int32_t));
-        cudaMemcpy(d_mask, padded_mask.ptr<int32_t>(), HW * sizeof(int32_t),
-                   cudaMemcpyHostToDevice);
+        // GPU mask data pointer（已在 GPU 上）
+        const int32_t* d_mask = reinterpret_cast<const int32_t*>(padded_mask.data);
 
-        // 上传 objects 数组到 GPU（用于 one_hot_encode kernel）
+        // 上传 objects 数组到 GPU（通常 <20 个 int32，开销可忽略）
         std::vector<int32_t> obj_i32(objects.begin(), objects.end());
         int32_t* d_objects = nullptr;
         cudaMalloc(&d_objects, obj_i32.size() * sizeof(int32_t));
@@ -381,10 +383,8 @@ cv::Mat InferenceCore::Impl::step(const cv::Mat& image, const cv::Mat& mask,
             int total_obj = object_manager.num_obj();
 
             // 1. 在 pred 中将 input mask > 0 的像素对应通道置零（GPU kernel）
-            // pred_no_bg = pred[1:, :, :] → [num_existing, HW]
-            cuda::mask_merge_zero(
-                GA::data_ptr(pred_prob_with_bg) + HW,  // skip bg channel
-                d_mask, num_existing, HW);
+            cuda::mask_merge_zero(GA::data_ptr(pred_prob_with_bg) + HW,  // skip bg channel
+                                  d_mask, num_existing, HW);
 
             // 2. 构建 merged_no_bg: [total_obj, H, W]（GPU）
             auto merged = alloc.zeros({total_obj, H, W});
@@ -393,8 +393,7 @@ cv::Mat InferenceCore::Impl::step(const cv::Mat& image, const cv::Mat& mask,
             int copy_obj = std::min(num_existing, total_obj);
             if (copy_obj > 0)
             {
-                cuda::copy_d2d(GA::data_ptr(merged),
-                               GA::data_ptr(pred_prob_with_bg) + HW,
+                cuda::copy_d2d(GA::data_ptr(merged), GA::data_ptr(pred_prob_with_bg) + HW,
                                copy_obj * HW);
             }
 
@@ -402,9 +401,8 @@ cv::Mat InferenceCore::Impl::step(const cv::Mat& image, const cv::Mat& mask,
             for (size_t mi = 0; mi < tmp_ids.size(); ++mi)
             {
                 int ch = tmp_ids[mi] - 1;
-                // one_hot_encode 写单个 object 到 merged 的 ch 通道
-                cuda::one_hot_encode(d_mask, d_objects + mi,
-                                    GA::data_ptr(merged) + ch * HW, 1, HW);
+                cuda::one_hot_encode(d_mask, d_objects + mi, GA::data_ptr(merged) + ch * HW, 1,
+                                     HW);
             }
 
             pred_prob_with_bg = ortcore::gpu_aggregate(alloc, merged);
@@ -417,14 +415,13 @@ cv::Mat InferenceCore::Impl::step(const cv::Mat& image, const cv::Mat& mask,
             for (size_t mi = 0; mi < tmp_ids.size(); ++mi)
             {
                 int ch = tmp_ids[mi] - 1;
-                cuda::one_hot_encode(d_mask, d_objects + mi,
-                                    GA::data_ptr(one_hot_gpu) + ch * HW, 1, HW);
+                cuda::one_hot_encode(d_mask, d_objects + mi, GA::data_ptr(one_hot_gpu) + ch * HW,
+                                     1, HW);
             }
 
             pred_prob_with_bg = ortcore::gpu_aggregate(alloc, one_hot_gpu);
         }
 
-        cudaFree(d_mask);
         cudaFree(d_objects);
 #endif
     }
@@ -460,35 +457,60 @@ cv::Mat InferenceCore::Impl::step(const cv::Mat& image, const cv::Mat& mask,
     // Clean up feature cache
     feature_store.keep_only(-1);
 
-    // 下载到 CPU 做后处理：unpad + resize
-    cv::Mat output;
+    // ③ GPU 后处理：unpad + resize + argmax
+    types::GpuCutieMask result;
     if (pred_prob_with_bg.IsTensor())
     {
 #ifdef ENABLE_ONNXRUNTIME
-        cv::Mat output_cpu = alloc.download(pred_prob_with_bg);
-        output = utils::unpad(output_cpu, pad);
+        auto prob_unpadded = ortcore::gpu_unpad(alloc, pred_prob_with_bg, pad);
 
         if (resize_needed)
         {
-            int num_ch = output.size[0];
-            int oh = output.size[1];
-            int ow = output.size[2];
-            int out_sizes[] = {num_ch, orig_h, orig_w};
-            cv::Mat resized(3, out_sizes, CV_32FC1);
-            for (int c = 0; c < num_ch; ++c)
-            {
-                cv::Mat slice(oh, ow, CV_32FC1, output.ptr<float>() + c * oh * ow);
-                cv::Mat rs;
-                cv::resize(slice, rs, cv::Size(orig_w, orig_h), 0, 0, cv::INTER_LINEAR);
-                std::memcpy(resized.ptr<float>() + c * orig_h * orig_w, rs.ptr<float>(),
-                            orig_h * orig_w * sizeof(float));
-            }
-            output = resized;
+            prob_unpadded = alloc.resize_channels(prob_unpadded, orig_h, orig_w);
         }
+
+        result.index_mask =
+            ortcore::gpu_prob_to_index_mask(alloc, prob_unpadded, object_manager.all_obj_ids());
+        result.gpu_prob = std::move(prob_unpadded);
 #endif
     }
 
-    return output;
+    result.object_ids = object_manager.all_obj_ids();
+    result.flag = true;
+    return result;
+}
+
+// ── step（CPU 包装：upload → step_gpu_impl → download）──────────────
+
+cv::Mat InferenceCore::Impl::step(const cv::Mat& image, const cv::Mat& mask,
+                                  const std::vector<ObjectId>& objects, bool end,
+                                  bool force_permanent)
+{
+    // 上传图像到 GPU
+    cv::cuda::GpuMat gpu_image;
+    gpu_image.upload(image);
+
+    // 上传 mask 到 GPU（如果有）
+    cv::cuda::GpuMat gpu_mask;
+    if (!mask.empty())
+    {
+        cv::Mat mask_i32 = mask;
+        if (mask_i32.type() != CV_32SC1) mask.convertTo(mask_i32, CV_32SC1);
+        gpu_mask.upload(mask_i32);
+    }
+
+    // 调用 GPU 路径
+    auto gpu_result = step_gpu_impl(gpu_image, gpu_mask, objects, end, force_permanent);
+
+    // 下载概率图到 CPU
+    if (gpu_result.gpu_prob.IsTensor())
+    {
+#ifdef ENABLE_ONNXRUNTIME
+        return network->gpu_alloc().download(gpu_result.gpu_prob);
+#endif
+    }
+
+    return cv::Mat();
 }
 
 // ── Public InferenceCore ────────────────────────────────────────────
@@ -508,6 +530,14 @@ cv::Mat InferenceCore::step(const cv::Mat& image, const cv::Mat& mask,
                             const std::vector<ObjectId>& objects, bool end, bool force_permanent)
 {
     return impl_->step(image, mask, objects, end, force_permanent);
+}
+
+types::GpuCutieMask InferenceCore::step_gpu(const cv::cuda::GpuMat& image_gpu,
+                                            const cv::cuda::GpuMat& mask_gpu,
+                                            const std::vector<ObjectId>& objects, bool end,
+                                            bool force_permanent)
+{
+    return impl_->step_gpu_impl(image_gpu, mask_gpu, objects, end, force_permanent);
 }
 
 void InferenceCore::delete_objects(const std::vector<ObjectId>& objects)

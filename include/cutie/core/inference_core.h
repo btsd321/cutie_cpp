@@ -6,6 +6,7 @@
 
 #include <linden_logger/logger_interface.hpp>
 #include <opencv2/core.hpp>
+#include <opencv2/core/cuda.hpp>
 
 #include "cutie/types.h"
 
@@ -51,6 +52,16 @@ public:
     cv::Mat step(const cv::Mat& image, const cv::Mat& mask = cv::Mat(),
                  const std::vector<ObjectId>& objects = {}, bool end = false,
                  bool force_permanent = false);
+
+    /// GPU 推理路径：输入/输出全部留在 GPU 上，无 CPU→GPU / GPU→CPU 拷贝。
+    /// @param image_gpu  BGR GpuMat (uint8, 原图尺寸)
+    /// @param mask_gpu   可选 index mask (CV_32SC1, 原图尺寸, 0=bg)
+    /// @param objects    mask 中的 ObjectId 列表（仅 mask 非空时需要）
+    /// @return GPU 上的分割结果（index_mask + prob + object_ids）
+    types::GpuCutieMask step_gpu(const cv::cuda::GpuMat& image_gpu,
+                                 const cv::cuda::GpuMat& mask_gpu = cv::cuda::GpuMat(),
+                                 const std::vector<ObjectId>& objects = {}, bool end = false,
+                                 bool force_permanent = false);
 
     // Object management
     void delete_objects(const std::vector<ObjectId>& objects);
