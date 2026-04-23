@@ -118,7 +118,30 @@ static cv::Mat visualize(const cv::Mat& frame, const cv::Mat& mask, float alpha 
 }
 
 int main(int argc, char** argv) {
-    auto logger = linden::log::StdLogger::instance();
+    // Resolve output directory: <executable dir>/output
+    namespace fs = std::filesystem;
+    fs::path exe_dir;
+    {
+        std::error_code ec;
+        fs::path exe = fs::canonical("/proc/self/exe", ec);
+        exe_dir = !ec ? exe.parent_path() : fs::absolute(fs::path(argv[0])).parent_path();
+    }
+    fs::path output_dir = exe_dir / "output";
+    {
+        std::error_code ec;
+        fs::remove_all(output_dir, ec);
+        fs::create_directories(output_dir, ec);
+        if (ec) {
+            std::cerr << "Failed to create output directory " << output_dir
+                      << ": " << ec.message() << std::endl;
+            return 1;
+        }
+    }
+
+    // 初始化 logger（同时输出到终端和文件）
+    linden::log::StdLogger::FileLogConfig log_config(
+        output_dir.string(), 7, 0, 0, "cutie_debug");
+    auto logger = linden::log::StdLogger::instance(log_config);
     logger->set_level(linden::log::LogLevel::DEBUG);
 
     argparse::ArgumentParser program("demo_basic");
@@ -180,29 +203,6 @@ int main(int argc, char** argv) {
         logger->info("Auto-detected model directory: {}", model_dir);
     }
 
-    // Resolve output directory: <executable dir>/output
-    namespace fs = std::filesystem;
-    fs::path exe_dir;
-    {
-        std::error_code ec;
-        fs::path exe = fs::canonical("/proc/self/exe", ec);
-        if (!ec) {
-            exe_dir = exe.parent_path();
-        } else {
-            exe_dir = fs::absolute(fs::path(argv[0])).parent_path();
-        }
-    }
-    fs::path output_dir = exe_dir / "output";
-    {
-        std::error_code ec;
-        fs::remove_all(output_dir, ec);
-        fs::create_directories(output_dir, ec);
-        if (ec) {
-            logger->error("Failed to create output directory {}: {}", output_dir.string(),
-                          ec.message());
-            return 1;
-        }
-    }
     logger->info("Saving results to: {}", output_dir.string());
 
     // 1. Create config
@@ -285,20 +285,13 @@ int main(int argc, char** argv) {
         }
     });
 
-    // 5. Setup file logger for debugging
-    // 日志文件保存在 <executable_dir>/output/cutie_debug.log
-    {
-        linden::log::StdLogger::FileLogConfig log_config(
-            output_dir.string(), 7, 0, 0, "cutie_debug");
-        linden::log::StdLogger::instance(log_config);
-    }
     logger->info("=== Cutie-CPP Debug Session Started ===");
     logger->info("Video: {}", video_path);
     logger->info("Mask: {}", mask_path);
     logger->info("Model: {}", config.model_prefix);
     logger->info("Frame skip: {}", frame_skip);
 
-    // 6. Process video frame by frame
+    // 5. Process video frame by frame
     ::cv::Mat frame;
     int frame_idx = 0;        // real (0-based) source frame index
     int processed_cnt = 0;    // number of frames actually inferred & saved
