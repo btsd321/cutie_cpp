@@ -165,9 +165,10 @@ set_target_properties(cutie PROPERTIES
 )
 
 if(ENABLE_ONNXRUNTIME)
-    target_include_directories(cutie PRIVATE ${ONNXRuntime_INCLUDE_DIRS})
-    target_link_libraries(cutie PRIVATE ${ONNXRuntime_LIBRARIES})
-    target_compile_definitions(cutie PRIVATE ENABLE_ONNXRUNTIME)
+    # 公共头文件 (cutie/types.h) 暴露了 Ort::Value,因此 include 必须 PUBLIC
+    target_include_directories(cutie PUBLIC ${ONNXRuntime_INCLUDE_DIRS})
+    target_link_libraries(cutie PUBLIC ${ONNXRuntime_LIBRARIES})
+    target_compile_definitions(cutie PUBLIC ENABLE_ONNXRUNTIME)
 endif()
 
 if(ENABLE_TENSORRT)
