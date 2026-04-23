@@ -307,6 +307,11 @@ int main(int argc, char** argv) {
     int processed_cnt = 0;    // number of frames actually inferred & saved
     bool user_quit = false;
 
+    // Output video writer (initialized on first frame)
+    ::cv::VideoWriter video_writer;
+    const double out_fps = cap.get(::cv::CAP_PROP_FPS);
+    const fs::path video_out_path = output_dir / "output_mask.mp4";
+
     while (cap.read(frame)) {
         // Some codecs return true with an empty frame at EOF — treat as end.
         if (frame.empty()) break;
@@ -347,6 +352,29 @@ int main(int argc, char** argv) {
 
         ::cv::Mat vis = visualize(frame, result.index_mask);
 
+        // Lazy-init video writer using first frame's size
+        if (!video_writer.isOpened()) {
+            int fourcc = ::cv::VideoWriter::fourcc('m', 'p', '4', 'v');
+            double fps = (out_fps > 0.0) ? out_fps : 25.0;
+            video_writer.open(video_out_path.string(), fourcc, fps, vis.size());
+            if (!video_writer.isOpened()) {
+                logger->error("Failed to open video writer: {}", video_out_path.string());
+            } else {
+                logger->info("Writing output video: {} ({}x{} @ {:.1f} fps)",
+                             video_out_path.string(), vis.cols, vis.rows, fps);
+            }
+        }
+
+        // Write frame to output video. When frame_skip > 0 we duplicate the
+        // visualized frame N+1 times so the output video keeps the same
+        // timeline as the source.
+        if (video_writer.isOpened()) {
+            const int repeat = (frame_idx == 0) ? 1 : (frame_skip + 1);
+            for (int r = 0; r < repeat; ++r) {
+                video_writer.write(vis);
+            }
+        }
+
         // Optional clone for display before we move into the save queue.
         ::cv::Mat vis_for_show;
         if (show_window) {
@@ -380,6 +408,11 @@ int main(int argc, char** argv) {
     producer_done.store(true);
     queue_cv.notify_all();
     saver.join();
+
+    if (video_writer.isOpened()) {
+        video_writer.release();
+        logger->info("Output video saved: {}", video_out_path.string());
+    }
 
     if (show_window) {
         ::cv::destroyAllWindows();
