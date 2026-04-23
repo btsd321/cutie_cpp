@@ -9,13 +9,14 @@
             "args": [
                 "--model-dir", "${workspaceFolder}/share/model",
                 "--video", "${workspaceFolder}/examples/example.mp4",
-                "--mask", "${workspaceFolder}/examples/example_frame0_mask.png"
+                "--mask", "${workspaceFolder}/examples/example_frame0_mask.png",
+                "--frame-skip", "2"
             ],
             "cwd": "${workspaceFolder}",
             "environment": [
                 {
                     "name": "LD_LIBRARY_PATH",
-                    "value": "${workspaceFolder}/vcpkg/installed/x64-linux/lib:~/Library/tensorrt/TensorRT-10.13.3.9/lib:/usr/local/cuda-12.9/lib64:${env:LD_LIBRARY_PATH}"
+                    "value": "/home/lixinlong/Project/linden_perception/thirdparty/vcpkg/installed/x64-linux/lib:~/Library/tensorrt/TensorRT-10.13.3.9/lib:/usr/local/cuda-12.9/lib64:${env:LD_LIBRARY_PATH}"
                 }
             ],
             "externalConsole": false,

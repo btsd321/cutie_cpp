@@ -3,7 +3,7 @@
  * @brief Basic demo of Cutie-CPP video object segmentation.
  *
  * Usage:
- *   ./demo_basic --video FILE --mask FILE [--model-dir DIR] [--visualize]
+ *   ./demo_basic --video FILE --mask FILE [--model-dir DIR] [--visualize] [--frame-skip N]
  *
  * Arguments:
  *   --video FILE     - Input video file
@@ -11,6 +11,8 @@
  *   --model-dir DIR  - Optional. Directory with 6 ONNX submodule files;
  *                      auto-detected from build/install paths if omitted.
  *   --visualize      - Optional. Show preview window in addition to saving frames.
+ *   --frame-skip N   - Optional. Skip N frames between inferences
+ *                      (0 = every frame, 1 = every 2nd, ...). Default 0.
  */
 
 #include "cutie/cutie.h"
@@ -132,6 +134,10 @@ int main(int argc, char** argv) {
         .default_value(false)
         .implicit_value(true)
         .help("Show preview window in addition to saving frames");
+    program.add_argument("--frame-skip", "-s")
+        .default_value(0)
+        .scan<'i', int>()
+        .help("Skip N frames between inferences (0 = process every frame, 1 = every 2nd, ...)");
 
     try {
         program.parse_args(argc, argv);
@@ -144,6 +150,7 @@ int main(int argc, char** argv) {
     const std::string video_path = program.get<std::string>("--video");
     const std::string mask_path  = program.get<std::string>("--mask");
     std::string model_dir        = program.get<std::string>("--model-dir");
+    const int frame_skip         = std::max(0, program.get<int>("--frame-skip"));
 
     if (model_dir.empty()) {
         model_dir = find_default_onnx_dir();
@@ -275,6 +282,13 @@ int main(int argc, char** argv) {
     bool user_quit = false;
 
     while (cap.read(frame)) {
+        // Skip every (frame_skip) frames between inferences. Frame 0 always runs to init.
+        const int stride = frame_skip + 1;
+        if (frame_idx != 0 && (frame_idx % stride) != 0) {
+            ++frame_idx;
+            continue;
+        }
+
         cutie::types::CutieMask result;
 
         auto t0 = std::chrono::steady_clock::now();
