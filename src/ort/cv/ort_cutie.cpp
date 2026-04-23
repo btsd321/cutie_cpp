@@ -9,6 +9,45 @@ namespace cutie
 namespace ortcv
 {
 
+// ── ONNX Runtime 日志回调 ────────────────────────────────────────
+
+static void ORT_API_CALL ort_logging_callback(void* param, OrtLoggingLevel severity,
+                                               const char* category, const char* logid,
+                                               const char* code_location, const char* message)
+{
+    auto* logger = static_cast<linden::log::ILogger*>(param);
+    if (!logger) return;
+
+    // 将 ORT 日志级别映射到 linden_logger 级别
+    linden::log::LogLevel level;
+    switch (severity)
+    {
+        case ORT_LOGGING_LEVEL_VERBOSE:
+        case ORT_LOGGING_LEVEL_INFO:
+            level = linden::log::LogLevel::DEBUG;
+            break;
+        case ORT_LOGGING_LEVEL_WARNING:
+            level = linden::log::LogLevel::WARN;
+            break;
+        case ORT_LOGGING_LEVEL_ERROR:
+        case ORT_LOGGING_LEVEL_FATAL:
+            level = linden::log::LogLevel::ERROR;
+            break;
+        default:
+            level = linden::log::LogLevel::INFO;
+    }
+
+    // 格式化输出：[ORT][category] message (location)
+    if (code_location && code_location[0] != '\0')
+    {
+        logger->logf(level, "[ORT][{}] {} ({})", fmt::make_format_args(category, message, code_location));
+    }
+    else
+    {
+        logger->logf(level, "[ORT][{}] {}", fmt::make_format_args(category, message));
+    }
+}
+
 // ── Internal session wrapper ────────────────────────────────────────
 
 struct OrtCutie::SessionBundle
@@ -50,8 +89,8 @@ struct OrtCutie::SessionBundle
 // ── Construction / destruction ──────────────────────────────────────
 
 OrtCutie::OrtCutie(const core::CutieConfig& config, std::shared_ptr<linden::log::ILogger> logger)
-    : env_(ORT_LOGGING_LEVEL_WARNING, "cutie"),
-      logger_(logger ? std::move(logger) : linden::log::StdLogger::instance())
+    : logger_(logger ? std::move(logger) : linden::log::StdLogger::instance()),
+      env_(ORT_LOGGING_LEVEL_WARNING, "cutie", ort_logging_callback, logger_.get())
 {
     namespace fs = std::filesystem;
     const std::string& dir = config.model_dir;

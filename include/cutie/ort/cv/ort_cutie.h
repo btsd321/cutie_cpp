@@ -122,9 +122,9 @@ private:
     struct SessionBundle;  // fwd decl for internal session wrapper
     using SessionPtr = std::unique_ptr<SessionBundle>;
 
+    std::shared_ptr<linden::log::ILogger> logger_;  // 必须在 env_ 之前，因为 env_ 构造时引用 logger_
     Ort::Env env_;
     std::unique_ptr<ortcore::GpuMemoryAllocator> gpu_alloc_;
-    std::shared_ptr<linden::log::ILogger> logger_;
 
     int model_h_ = 0;
     int model_w_ = 0;
