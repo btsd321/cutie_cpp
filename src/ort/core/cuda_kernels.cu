@@ -103,9 +103,47 @@ void sigmoid(const float* x, float* out, int64_t n)
     CUDA_CHECK(cudaGetLastError());
 }
 
+// ── aggregate_logits ────────────────────────────────────────────────
+// prob_no_bg: [num_obj, HW] → out: [num_obj+1, HW]
+// 对每个像素位置：计算 bg = prod(1 - prob)，拼接，转 logit（不做 softmax）
+
+__global__ void aggregate_logits_kernel(const float* prob_no_bg, float* out, int num_obj, int hw)
+{
+    int px = blockIdx.x * blockDim.x + threadIdx.x;
+    if (px >= hw)
+        return;
+
+    // 1. 计算背景概率：bg = prod(1 - prob)
+    float bg_prob = 1.0f;
+    for (int o = 0; o < num_obj; ++o)
+    {
+        float p = prob_no_bg[o * hw + px];
+        bg_prob *= (1.0f - p);
+    }
+
+    // 2. 拼接 [bg, prob]，clamp，转 logit
+    float bg_clamped = fmaxf(1e-7f, fminf(1.0f - 1e-7f, bg_prob));
+    float bg_logit = logf(bg_clamped / (1.0f - bg_clamped));
+    out[px] = bg_logit;  // bg channel
+
+    for (int o = 0; o < num_obj; ++o)
+    {
+        float p = prob_no_bg[o * hw + px];
+        float p_clamped = fmaxf(1e-7f, fminf(1.0f - 1e-7f, p));
+        float logit = logf(p_clamped / (1.0f - p_clamped));
+        out[(o + 1) * hw + px] = logit;
+    }
+}
+
+void aggregate_logits(const float* prob_no_bg, float* out, int num_obj, int hw)
+{
+    aggregate_logits_kernel<<<div_ceil(hw, kBlockSize), kBlockSize>>>(prob_no_bg, out, num_obj, hw);
+    CUDA_CHECK(cudaGetLastError());
+}
+
 // ── aggregate_softmax ───────────────────────────────────────────────
 // prob_no_bg: [num_obj, HW] → out: [num_obj+1, HW]
-// 对每个像素位置：prob→logit，加 bg(logit=0)，softmax
+// 对每个像素位置：计算 bg = prod(1 - prob)，拼接，转 logit，softmax
 
 __global__ void aggregate_softmax_kernel(const float* prob_no_bg, float* out, int num_obj, int hw)
 {
@@ -115,29 +153,42 @@ __global__ void aggregate_softmax_kernel(const float* prob_no_bg, float* out, in
 
     int num_ch = num_obj + 1;
 
-    // 1. prob → logit，找 max
-    float max_val = 0.0f;  // bg logit = 0
+    // 1. 计算背景概率：bg = prod(1 - prob)
+    float bg_prob = 1.0f;
     for (int o = 0; o < num_obj; ++o)
     {
         float p = prob_no_bg[o * hw + px];
-        p = fmaxf(1e-7f, fminf(1.0f - 1e-7f, p));
-        float logit = logf(p / (1.0f - p));
-        if (logit > max_val)
-            max_val = logit;
+        bg_prob *= (1.0f - p);
     }
 
-    // 2. softmax
-    float sum_exp = expf(-max_val);  // bg: exp(0 - max)
-    out[px] = sum_exp;               // bg channel
+    // 2. 拼接 [bg, prob]，clamp，转 logit
+    float bg_clamped = fmaxf(1e-7f, fminf(1.0f - 1e-7f, bg_prob));
+    float bg_logit = logf(bg_clamped / (1.0f - bg_clamped));
+
+    float max_logit = bg_logit;
     for (int o = 0; o < num_obj; ++o)
     {
         float p = prob_no_bg[o * hw + px];
-        p = fmaxf(1e-7f, fminf(1.0f - 1.0e-7f, p));
-        float logit = logf(p / (1.0f - p));
-        float e = expf(logit - max_val);
+        float p_clamped = fmaxf(1e-7f, fminf(1.0f - 1e-7f, p));
+        float logit = logf(p_clamped / (1.0f - p_clamped));
+        if (logit > max_logit)
+            max_logit = logit;
+    }
+
+    // 3. softmax
+    float sum_exp = expf(bg_logit - max_logit);
+    out[px] = sum_exp;  // bg channel
+
+    for (int o = 0; o < num_obj; ++o)
+    {
+        float p = prob_no_bg[o * hw + px];
+        float p_clamped = fmaxf(1e-7f, fminf(1.0f - 1e-7f, p));
+        float logit = logf(p_clamped / (1.0f - p_clamped));
+        float e = expf(logit - max_logit);
         out[(o + 1) * hw + px] = e;
         sum_exp += e;
     }
+
     float inv = 1.0f / sum_exp;
     for (int c = 0; c < num_ch; ++c)
     {
@@ -148,6 +199,45 @@ __global__ void aggregate_softmax_kernel(const float* prob_no_bg, float* out, in
 void aggregate_softmax(const float* prob_no_bg, float* out, int num_obj, int hw)
 {
     aggregate_softmax_kernel<<<div_ceil(hw, kBlockSize), kBlockSize>>>(prob_no_bg, out, num_obj, hw);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+// ── softmax_channels ────────────────────────────────────────────────
+// logits: [C, HW] → out: [C, HW]
+// 对每个像素位置沿通道维度做 softmax
+
+__global__ void softmax_channels_kernel(const float* logits, float* out, int C, int hw)
+{
+    int px = blockIdx.x * blockDim.x + threadIdx.x;
+    if (px >= hw)
+        return;
+
+    float max_val = logits[px];
+    for (int c = 1; c < C; ++c)
+    {
+        float v = logits[c * hw + px];
+        if (v > max_val)
+            max_val = v;
+    }
+
+    float sum_exp = 0.0f;
+    for (int c = 0; c < C; ++c)
+    {
+        float e = expf(logits[c * hw + px] - max_val);
+        out[c * hw + px] = e;
+        sum_exp += e;
+    }
+
+    float inv = 1.0f / sum_exp;
+    for (int c = 0; c < C; ++c)
+    {
+        out[c * hw + px] *= inv;
+    }
+}
+
+void softmax_channels(const float* logits, float* out, int C, int hw)
+{
+    softmax_channels_kernel<<<div_ceil(hw, kBlockSize), kBlockSize>>>(logits, out, C, hw);
     CUDA_CHECK(cudaGetLastError());
 }
 

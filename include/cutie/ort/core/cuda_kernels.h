@@ -25,10 +25,17 @@ void slice_last_dim(const float* src, int64_t src_inner, float* dst, int64_t sli
 /// Sigmoid 激活：out[i] = 1 / (1 + exp(-x[i]))
 void sigmoid(const float* x, float* out, int64_t n);
 
+/// 聚合（aggregate）：prob_no_bg [num_obj, HW] → logits [num_obj+1, HW]
+/// 计算 bg = prod(1 - prob)，拼接 [bg, prob]，转为 logits（不做 softmax）
+void aggregate_logits(const float* prob_no_bg, float* out, int num_obj, int hw);
+
 /// 聚合 + Softmax（aggregate_with_bg）。
 /// prob_no_bg: [num_obj, H, W]  →  out: [num_obj+1, H, W]
 /// 先将 prob 转为 logit，添加 bg 通道（logit=0），再做 softmax。
 void aggregate_softmax(const float* prob_no_bg, float* out, int num_obj, int hw);
+
+/// Softmax 沿通道维度：logits [C, HW] → prob [C, HW]
+void softmax_channels(const float* logits, float* out, int C, int hw);
 
 /// 各向异性 L2 相似度计算。
 /// memory_key: [B, CK, N],  memory_shrinkage: [B, 1, N]

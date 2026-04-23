@@ -208,7 +208,7 @@ Ort::Value InferenceCore::Impl::segment(ImageFeatureStore::CachedFeatures& feat,
         memory->update_sensory(seg_result.new_sensory, object_manager.all_obj_ids());
     }
 
-    // logits: [num_objects, 1, H/4, W/4] → sigmoid → aggregate
+    // logits: [num_objects, 1, H/4, W/4] → sigmoid → aggregate → upsample → softmax
     auto logits_shape = GA::shape(seg_result.logits);
     int num_obj = static_cast<int>(logits_shape[0]);
     int lh = static_cast<int>(logits_shape[2]);
@@ -223,14 +223,16 @@ Ort::Value InferenceCore::Impl::segment(ImageFeatureStore::CachedFeatures& feat,
     // Sigmoid → prob
     auto prob_no_bg = ortcore::gpu_sigmoid(alloc, logits_clone);
 
-    // Aggregate: add background, softmax
-    auto prob_with_bg = ortcore::gpu_aggregate(alloc, prob_no_bg);
+    // Aggregate: add background, convert to logits (no softmax yet)
+    auto logits_with_bg = ortcore::gpu_aggregate_logits(alloc, prob_no_bg);
 
-    // Upsample 4× to full resolution（GPU）
+    // Upsample 4× to full resolution in logit space（GPU）
     int full_h = lh * 4;
     int full_w = lw * 4;
+    auto logits_upsampled = alloc.resize_channels(logits_with_bg, full_h, full_w);
 
-    return alloc.resize_channels(prob_with_bg, full_h, full_w);
+    // Softmax along channel dimension
+    return ortcore::gpu_softmax_channels(alloc, logits_upsampled);
 #else
     return Ort::Value{nullptr};
 #endif

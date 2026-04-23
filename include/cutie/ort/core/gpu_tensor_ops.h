@@ -36,9 +36,16 @@ std::pair<Ort::Value, Ort::Value> gpu_do_softmax(GpuMemoryAllocator& alloc,
 Ort::Value gpu_readout(GpuMemoryAllocator& alloc, const Ort::Value& affinity,
                        const Ort::Value& mv);
 
+/// 多对象聚合（GPU 版本）：prob_no_bg [num_obj, H, W] → logits [num_obj+1, H, W]
+/// 计算 bg = prod(1 - prob)，拼接 [bg, prob]，转为 logits（不做 softmax）
+Ort::Value gpu_aggregate_logits(GpuMemoryAllocator& alloc, const Ort::Value& prob_no_bg);
+
 /// 多对象聚合 + Softmax（GPU 版本）。
 /// prob_no_bg: [num_obj, H, W]  →  [num_obj+1, H, W]
 Ort::Value gpu_aggregate(GpuMemoryAllocator& alloc, const Ort::Value& prob_no_bg);
+
+/// Softmax 沿通道维度（GPU 版本）：logits [C, H, W] → prob [C, H, W]
+Ort::Value gpu_softmax_channels(GpuMemoryAllocator& alloc, const Ort::Value& logits);
 
 /// Sigmoid 激活（GPU 版本）。
 /// x: [N] → out: [N]，就地或新分配。

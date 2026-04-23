@@ -150,6 +150,22 @@ Ort::Value gpu_readout_4d(GA& alloc, const Ort::Value& affinity, const Ort::Valu
     return alloc.clone(out_4d);
 }
 
+// ── gpu_aggregate_logits ────────────────────────────────────────────
+
+Ort::Value gpu_aggregate_logits(GA& alloc, const Ort::Value& prob_no_bg)
+{
+    auto shape = GA::shape(prob_no_bg);
+    int num_obj = static_cast<int>(shape[0]);
+    int H = static_cast<int>(shape[1]);
+    int W = static_cast<int>(shape[2]);
+    int HW = H * W;
+
+    auto result = alloc.allocate({num_obj + 1, H, W});
+    cuda::aggregate_logits(GA::data_ptr(prob_no_bg), GA::data_ptr(result), num_obj, HW);
+
+    return result;
+}
+
 // ── gpu_aggregate ───────────────────────────────────────────────────
 
 Ort::Value gpu_aggregate(GA& alloc, const Ort::Value& prob_no_bg)
@@ -162,6 +178,22 @@ Ort::Value gpu_aggregate(GA& alloc, const Ort::Value& prob_no_bg)
 
     auto result = alloc.allocate({num_obj + 1, H, W});
     cuda::aggregate_softmax(GA::data_ptr(prob_no_bg), GA::data_ptr(result), num_obj, HW);
+
+    return result;
+}
+
+// ── gpu_softmax_channels ────────────────────────────────────────────
+
+Ort::Value gpu_softmax_channels(GA& alloc, const Ort::Value& logits)
+{
+    auto shape = GA::shape(logits);
+    int C = static_cast<int>(shape[0]);
+    int H = static_cast<int>(shape[1]);
+    int W = static_cast<int>(shape[2]);
+    int HW = H * W;
+
+    auto result = alloc.allocate(shape);
+    cuda::softmax_channels(GA::data_ptr(logits), GA::data_ptr(result), C, HW);
 
     return result;
 }
