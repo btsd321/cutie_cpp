@@ -205,8 +205,9 @@ endif()
 
 # === 示例 ===
 if(BUILD_EXAMPLES)
+    find_package(argparse CONFIG REQUIRED)
     add_executable(demo_basic examples/demo_basic.cpp)
-    target_link_libraries(demo_basic cutie ${OpenCV_LIBS})
+    target_link_libraries(demo_basic cutie ${OpenCV_LIBS} argparse::argparse)
     # 编译期嵌入两个候选模型目录，供 demo 运行时自动探测
     target_compile_definitions(demo_basic PRIVATE
         CUTIE_BUILD_MODEL_DIR="${CUTIE_MODEL_SOURCE_DIR}"

@@ -7,9 +7,9 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/demo_basic",
             "args": [
-                "${workspaceFolder}/share/model",
-                "${workspaceFolder}/examples/example.mp4",
-                "${workspaceFolder}/examples/example_frame0_mask.png"
+                "--model-dir", "${workspaceFolder}/share/model",
+                "--video", "${workspaceFolder}/examples/example.mp4",
+                "--mask", "${workspaceFolder}/examples/example_frame0_mask.png"
             ],
             "cwd": "${workspaceFolder}",
             "environment": [
@@ -35,9 +35,9 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/demo_basic",
             "args": [
-                "${workspaceFolder}/share/model",
-                "${workspaceFolder}/examples/example.mp4",
-                "${workspaceFolder}/examples/example_frame0_mask.png"
+                "--model-dir", "${workspaceFolder}/share/model",
+                "--video", "${workspaceFolder}/examples/example.mp4",
+                "--mask", "${workspaceFolder}/examples/example_frame0_mask.png"
             ],
             "cwd": "${workspaceFolder}",
             "environment": [
