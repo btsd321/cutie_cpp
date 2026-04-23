@@ -139,8 +139,18 @@ int main(int argc, char** argv) {
     }
 
     // 初始化 logger（同时输出到终端和文件）
+    std::string log_name = "cutie_debug";
+    {
+        auto now = std::chrono::system_clock::now();
+        std::time_t t = std::chrono::system_clock::to_time_t(now);
+        std::tm tm{};
+        localtime_r(&t, &tm);
+        std::ostringstream oss;
+        oss << "cutie_debug_" << std::put_time(&tm, "%Y%m%d_%H%M%S");
+        log_name = oss.str();
+    }
     linden::log::StdLogger::FileLogConfig log_config(
-        output_dir.string(), 7, 0, 0, "cutie_debug");
+        output_dir.string(), 7, 0, 0, log_name);
     auto logger = linden::log::StdLogger::instance(log_config);
     logger->set_level(linden::log::LogLevel::DEBUG);
 
