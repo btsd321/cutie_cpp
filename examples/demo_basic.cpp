@@ -118,6 +118,9 @@ static cv::Mat visualize(const cv::Mat& frame, const cv::Mat& mask, float alpha 
 }
 
 int main(int argc, char** argv) {
+    auto logger = linden::log::StdLogger::instance();
+    logger->set_level(linden::log::LogLevel::DEBUG);
+
     argparse::ArgumentParser program("demo_basic");
     program.add_description("Cutie-CPP video object segmentation demo.");
 
@@ -142,7 +145,7 @@ int main(int argc, char** argv) {
     try {
         program.parse_args(argc, argv);
     } catch (const std::exception& e) {
-        std::cerr << e.what() << "\n\n" << program;
+        logger->error("{}\n\n{}", e.what(), program.help().str());
         return 1;
     }
 
@@ -155,25 +158,26 @@ int main(int argc, char** argv) {
     if (model_dir.empty()) {
         model_dir = find_default_onnx_dir();
         if (model_dir.empty()) {
-            std::cerr
-                << "Error: could not find ONNX model files.\n"
-                << "  Tried build path  : "
+            logger->error("Error: could not find ONNX model files.");
+            logger->error("  Tried build path  : {}",
 #ifdef CUTIE_BUILD_MODEL_DIR
-                << CUTIE_BUILD_MODEL_DIR
+                CUTIE_BUILD_MODEL_DIR
 #else
-                << "(not configured)"
+                "(not configured)"
 #endif
-                << "\n  Tried install path: "
+            );
+            logger->error("  Tried install path: {}",
 #ifdef CUTIE_INSTALL_MODEL_DIR
-                << CUTIE_INSTALL_MODEL_DIR
+                CUTIE_INSTALL_MODEL_DIR
 #else
-                << "(not configured)"
+                "(not configured)"
 #endif
-                << "\nRun 'cmake --build . --target download_models' and export ONNX files,\n"
-                << "or pass --model-dir explicitly.\n";
+            );
+            logger->error("Run 'cmake --build . --target download_models' and export ONNX files,");
+            logger->error("or pass --model-dir explicitly.");
             return 1;
         }
-        std::cout << "Auto-detected model directory: " << model_dir << std::endl;
+        logger->info("Auto-detected model directory: {}", model_dir);
     }
 
     // Resolve output directory: <executable dir>/output
@@ -191,14 +195,15 @@ int main(int argc, char** argv) {
     fs::path output_dir = exe_dir / "output";
     {
         std::error_code ec;
+        fs::remove_all(output_dir, ec);
         fs::create_directories(output_dir, ec);
         if (ec) {
-            std::cerr << "Failed to create output directory " << output_dir
-                      << ": " << ec.message() << std::endl;
+            logger->error("Failed to create output directory {}: {}", output_dir.string(),
+                          ec.message());
             return 1;
         }
     }
-    std::cout << "Saving results to: " << output_dir << std::endl;
+    logger->info("Saving results to: {}", output_dir.string());
 
     // 1. Create config
     auto config = CutieConfig::base_default(model_dir);
@@ -206,27 +211,32 @@ int main(int argc, char** argv) {
     config.mem_every = 5;
     config.model_prefix = find_model_prefix(model_dir);
     if (config.model_prefix.empty()) {
-        std::cerr << "Error: no prefixed ONNX files found in " << model_dir
-                  << "\n  Expected pattern: <prefix>_pixel_encoder.onnx\n";
+        logger->error("Error: no prefixed ONNX files found in {}", model_dir);
+        logger->error("  Expected pattern: <prefix>_pixel_encoder.onnx");
         return 1;
     }
-    std::cout << "Using model prefix: " << config.model_prefix << std::endl;
+    logger->info("Using model prefix: {}", config.model_prefix);
 
     // 2. Create processor
-    std::cout << "Loading model from " << model_dir << "..." << std::endl;
+    logger->info("Loading model from {}...", model_dir);
     CutieProcessor processor(config);
 
     // 3. Open video
     ::cv::VideoCapture cap(video_path);
     if (!cap.isOpened()) {
-        std::cerr << "Failed to open video: " << video_path << std::endl;
+        logger->error("Failed to open video: {}", video_path);
         return 1;
+    }
+    {
+        const double fps    = cap.get(::cv::CAP_PROP_FPS);
+        const double nframe = cap.get(::cv::CAP_PROP_FRAME_COUNT);
+        logger->info("Video: {}  fps={}  reported_frame_count={}", video_path, fps, nframe);
     }
 
     // 4. Read first-frame mask
     ::cv::Mat mask_img = ::cv::imread(mask_path, ::cv::IMREAD_GRAYSCALE);
     if (mask_img.empty()) {
-        std::cerr << "Failed to read mask: " << mask_path << std::endl;
+        logger->error("Failed to read mask: {}", mask_path);
         return 1;
     }
     ::cv::Mat idx_mask;
@@ -241,7 +251,7 @@ int main(int argc, char** argv) {
             objects.push_back(id);
         }
     }
-    std::cout << "Found " << objects.size() << " objects in mask" << std::endl;
+    logger->info("Found {} objects in mask", objects.size());
 
     // ---- Background save thread + queue ------------------------------------
     struct SaveJob {
@@ -270,18 +280,34 @@ int main(int argc, char** argv) {
             oss << "frame_" << std::setw(6) << std::setfill('0') << job.idx << ".jpg";
             fs::path out_path = output_dir / oss.str();
             if (!::cv::imwrite(out_path.string(), job.image)) {
-                std::cerr << "Failed to write " << out_path << std::endl;
+                logger->error("Failed to write {}", out_path.string());
             }
         }
     });
 
-    // 5. Process video frame by frame
+    // 5. Setup file logger for debugging
+    // 日志文件保存在 <executable_dir>/output/cutie_debug.log
+    {
+        linden::log::StdLogger::FileLogConfig log_config(
+            output_dir.string(), 7, 0, 0, "cutie_debug");
+        linden::log::StdLogger::instance(log_config);
+    }
+    logger->info("=== Cutie-CPP Debug Session Started ===");
+    logger->info("Video: {}", video_path);
+    logger->info("Mask: {}", mask_path);
+    logger->info("Model: {}", config.model_prefix);
+    logger->info("Frame skip: {}", frame_skip);
+
+    // 6. Process video frame by frame
     ::cv::Mat frame;
-    int frame_idx = 0;
-    auto logger = linden::log::StdLogger::instance();
+    int frame_idx = 0;        // real (0-based) source frame index
+    int processed_cnt = 0;    // number of frames actually inferred & saved
     bool user_quit = false;
 
     while (cap.read(frame)) {
+        // Some codecs return true with an empty frame at EOF — treat as end.
+        if (frame.empty()) break;
+
         // Skip every (frame_skip) frames between inferences. Frame 0 always runs to init.
         const int stride = frame_skip + 1;
         if (frame_idx != 0 && (frame_idx % stride) != 0) {
@@ -304,8 +330,17 @@ int main(int argc, char** argv) {
         auto t1 = std::chrono::steady_clock::now();
         double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-        logger->debug("[demo] frame {:4d} | inference={:.1f} ms | objects={}",
-                      frame_idx, ms, result.object_ids.size());
+        // 统计每个目标的像素数，方便排查分割结果
+        int total_fg = 0;
+        for (auto obj_id : result.object_ids) {
+            int px_count = ::cv::countNonZero(result.index_mask == obj_id);
+            total_fg += px_count;
+            logger->debug("[demo] frame {:4d} | obj {} pixels={}", frame_idx, obj_id, px_count);
+        }
+        int total_px = result.index_mask.rows * result.index_mask.cols;
+        logger->debug("[demo] frame {:4d} | {:.1f} ms | fg={}/{} ({:.1f}%)",
+                      frame_idx, ms, total_fg, total_px,
+                      total_px > 0 ? 100.0 * total_fg / total_px : 0.0);
 
         ::cv::Mat vis = visualize(frame, result.index_mask);
 
@@ -316,12 +351,15 @@ int main(int argc, char** argv) {
         }
 
         // Enqueue for background save (block if queue too large to bound memory).
+        // Filename uses the REAL source frame index, so e.g. with --frame-skip 2
+        // you'll see frame_000000.jpg, frame_000003.jpg, frame_000006.jpg ...
         {
             std::unique_lock<std::mutex> lk(queue_mu);
             queue_cv.wait(lk, [&] { return save_queue.size() < kMaxQueue; });
             save_queue.push(SaveJob{frame_idx, std::move(vis)});
         }
         queue_cv.notify_one();
+        ++processed_cnt;
 
         if (show_window) {
             ::cv::imshow("Cutie-CPP Demo", vis_for_show);
@@ -343,7 +381,9 @@ int main(int argc, char** argv) {
     if (show_window) {
         ::cv::destroyAllWindows();
     }
-    logger->debug("[demo] done | total frames={}", frame_idx);
+    logger->info("Done. read {} source frames, saved {} inferred frames to {}",
+                 frame_idx, processed_cnt, output_dir.string());
+    logger->debug("[demo] done | source_frames={} | saved={}", frame_idx, processed_cnt);
     (void)user_quit;
     return 0;
 }
