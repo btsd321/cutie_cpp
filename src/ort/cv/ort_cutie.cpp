@@ -86,11 +86,23 @@ struct OrtCutie::SessionBundle
     }
 };
 
+static OrtLoggingLevel to_ort_level(linden::log::LogLevel level)
+{
+    switch (level)
+    {
+        case linden::log::LogLevel::DEBUG: return ORT_LOGGING_LEVEL_VERBOSE;
+        case linden::log::LogLevel::INFO:  return ORT_LOGGING_LEVEL_INFO;
+        case linden::log::LogLevel::WARN:  return ORT_LOGGING_LEVEL_WARNING;
+        case linden::log::LogLevel::ERROR: return ORT_LOGGING_LEVEL_ERROR;
+        default:                           return ORT_LOGGING_LEVEL_WARNING;
+    }
+}
+
 // ── Construction / destruction ──────────────────────────────────────
 
 OrtCutie::OrtCutie(const core::CutieConfig& config, std::shared_ptr<linden::log::ILogger> logger)
     : logger_(logger ? std::move(logger) : linden::log::StdLogger::instance()),
-      env_(ORT_LOGGING_LEVEL_WARNING, "cutie", ort_logging_callback, logger_.get())
+      env_(to_ort_level(logger_->get_level()), "cutie", ort_logging_callback, logger_.get())
 {
     namespace fs = std::filesystem;
     const std::string& dir = config.model_dir;
