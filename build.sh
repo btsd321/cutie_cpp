@@ -9,8 +9,8 @@ JOBS="$(nproc 2>/dev/null || echo 4)"
 # Dependency paths (empty = auto-detect)
 VCPKG_ROOT="/home/lixinlong/Project/linden_perception/thirdparty/vcpkg"  # if set, use vcpkg installed packages (overrides other paths)
 CUDA_ROOT="/usr/local/cuda-12.9"
-OPENCV_DIR="./vcpkg/installed/x64-linux"
-ONNXRUNTIME_ROOT="./vcpkg/installed/x64-linux"
+OPENCV_DIR="${VCPKG_ROOT}/installed/x64-linux"
+ONNXRUNTIME_ROOT="${VCPKG_ROOT}/installed/x64-linux"
 TENSORRT_ROOT="~/Library/tensorrt/TensorRT-10.13.3.9"
 INSTALL_PREFIX="${SCRIPT_DIR}/install"
 
