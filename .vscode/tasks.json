@@ -4,7 +4,7 @@
         {
             "label": "build",
             "type": "shell",
-            "command": "bash build.sh --vcpkg-root /home/lixinlong/Project/linden_perception/thirdparty/vcpkg --debug",
+            "command": "bash build.sh --vcpkg-root /home/lixinlong/Project/linden_perception/thirdparty/vcpkg --build-type Debug",
             "options": {
                 "cwd": "${workspaceFolder}"
             },
