@@ -208,16 +208,23 @@ Ort::Value InferenceCore::Impl::segment(ImageFeatureStore::CachedFeatures& feat,
         memory->update_sensory(seg_result.new_sensory, object_manager.all_obj_ids());
     }
 
-    // logits: [num_objects, 1, H/4, W/4] → sigmoid → aggregate → upsample → softmax
+    // logits: [B, N_static, H/4, W/4] → slice to [B, N_actual, H/4, W/4] → sigmoid → aggregate → upsample → softmax
     auto logits_shape = GA::shape(seg_result.logits);
-    int num_obj = static_cast<int>(logits_shape[0]);
+    int B = static_cast<int>(logits_shape[0]);
+    int N_static = static_cast<int>(logits_shape[1]);
     int lh = static_cast<int>(logits_shape[2]);
     int lw = static_cast<int>(logits_shape[3]);
 
-    // Remove singleton dim: [num_obj, 1, lh, lw] → [num_obj, lh, lw]
+    // Get actual number of objects
+    int N_actual = object_manager.num_obj();
+
+    // Slice to actual number of objects: [B, N_static, lh, lw] → [B, N_actual, lh, lw]
+    auto logits_sliced = alloc.slice_dim(seg_result.logits, 1, N_actual);
+
+    // Reshape: [B, N_actual, lh, lw] → [N_actual, lh, lw] (remove batch dim)
     auto logits_3d = Ort::Value::CreateTensor<float>(
-        alloc.memory_info(), GA::data_ptr(seg_result.logits), num_obj * lh * lw,
-        std::vector<int64_t>{num_obj, lh, lw}.data(), 3);
+        alloc.memory_info(), GA::data_ptr(logits_sliced), N_actual * lh * lw,
+        std::vector<int64_t>{N_actual, lh, lw}.data(), 3);
     auto logits_clone = alloc.clone(logits_3d);
 
     // Sigmoid → prob
