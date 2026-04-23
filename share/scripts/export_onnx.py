@@ -336,8 +336,6 @@ def main():
                         help='Path to .pth weights file')
     parser.add_argument('--output', type=str, default='./onnx_models/',
                         help='Output directory for ONNX files')
-    parser.add_argument('--height', type=int, default=480)
-    parser.add_argument('--width', type=int, default=480)
     parser.add_argument('--num-objects', type=int, default=2)
     parser.add_argument('--opset', type=int, default=17)
     args = parser.parse_args()
@@ -349,7 +347,7 @@ def main():
     weights_stem = os.path.splitext(os.path.basename(args.weights))[0]
     prefix = weights_stem + '_'
 
-    H, W = args.height, args.width
+    H, W = 480, 480  # trace-only example size; all submodules are exported with dynamic H/W
     h16, w16 = H // 16, W // 16
     h8, w8 = H // 8, W // 8
     h4, w4 = H // 4, W // 4
@@ -368,7 +366,7 @@ def main():
     num_queries = 16
 
     print(f"\nExporting {args.variant} model to {args.output}")
-    print(f"  Resolution: {H}×{W} (used as trace example; model supports dynamic resolution), Objects: {n_obj}\n")
+    print(f"  Trace resolution: {H}×{W} (model supports dynamic resolution at runtime), Objects: {n_obj}\n")
 
     # ── Dynamic-axes specs for each submodule ──────────────────────
     # All spatial dimensions (H/W at each scale) are marked dynamic so

@@ -187,6 +187,58 @@ Ort::Value InferenceCore::Impl::segment(ImageFeatureStore::CachedFeatures& feat,
 #ifdef ENABLE_ONNXRUNTIME
     auto& alloc = network->gpu_alloc();
 
+    // DEBUG: 输出 feat 的各个 tensor 统计信息
+    {
+        auto key_shape = GA::shape(feat.key);
+        auto sel_shape = GA::shape(feat.selection);
+        auto shr_shape = GA::shape(feat.shrinkage);
+        auto f8_shape = GA::shape(feat.f8);
+        auto f4_shape = GA::shape(feat.f4);
+        auto pf_shape = GA::shape(feat.pix_feat);
+
+        auto stat = [&](const Ort::Value& v, const char* name) {
+            cv::Mat cpu = alloc.download(v);
+            float* p = cpu.ptr<float>();
+            int64_t n = GA::numel(GA::shape(v));
+            float mn = *std::min_element(p, p + n);
+            float mx = *std::max_element(p, p + n);
+            float mean = std::accumulate(p, p + n, 0.0f) / n;
+            logger->debug("[DEBUG] feat.{}: range=[{:.4f},{:.4f}], mean={:.4f}", name, mn, mx, mean);
+        };
+        logger->debug("[DEBUG] feat.key shape=[{},{},{},{}], feat.selection shape=[{},{},{},{}], feat.shrinkage shape=[{},{},{},{}]",
+                      key_shape[0], key_shape[1], key_shape[2], key_shape[3],
+                      sel_shape[0], sel_shape[1], sel_shape[2], sel_shape[3],
+                      shr_shape[0], shr_shape[1], shr_shape[2], shr_shape[3]);
+        logger->debug("[DEBUG] feat.f8 shape=[{},{},{},{}], feat.f4 shape=[{},{},{},{}], feat.pix_feat shape=[{},{},{},{}]",
+                      f8_shape[0], f8_shape[1], f8_shape[2], f8_shape[3],
+                      f4_shape[0], f4_shape[1], f4_shape[2], f4_shape[3],
+                      pf_shape[0], pf_shape[1], pf_shape[2], pf_shape[3]);
+        stat(feat.key, "key");
+        stat(feat.selection, "selection");
+        stat(feat.shrinkage, "shrinkage");
+        stat(feat.pix_feat, "pix_feat");
+    }
+
+    // DEBUG: 输出 last_mask 的统计信息
+    if (last_mask.IsTensor())
+    {
+        auto lm_shape = GA::shape(last_mask);
+        cv::Mat lm_cpu = alloc.download(last_mask);
+        float* lm_ptr = lm_cpu.ptr<float>();
+        int64_t lm_size = GA::numel(lm_shape);
+        float lm_min = *std::min_element(lm_ptr, lm_ptr + lm_size);
+        float lm_max = *std::max_element(lm_ptr, lm_ptr + lm_size);
+        float lm_mean = std::accumulate(lm_ptr, lm_ptr + lm_size, 0.0f) / lm_size;
+        int lm_fg = std::count_if(lm_ptr, lm_ptr + lm_size, [](float v) { return v > 0.5f; });
+        logger->debug("[DEBUG] last_mask shape=[{},{},{},{}], range=[{:.4f},{:.4f}], mean={:.4f}, fg(>0.5)={}/{} ({:.1f}%)",
+                      lm_shape[0], lm_shape[1], lm_shape[2], lm_shape[3],
+                      lm_min, lm_max, lm_mean, lm_fg, lm_size, lm_fg * 100.0f / lm_size);
+    }
+    else
+    {
+        logger->debug("[DEBUG] last_mask is empty");
+    }
+
     // Flatten key/selection: [1, C, H, W] → [1, C, HW]
     auto flat_key = ortcore::gpu_flatten_spatial(alloc, feat.key);
     auto flat_sel = ortcore::gpu_flatten_spatial(alloc, feat.selection);
@@ -198,10 +250,55 @@ Ort::Value InferenceCore::Impl::segment(ImageFeatureStore::CachedFeatures& feat,
     // realize dict → stacked tensor [B, num_objects, C, H, W]
     auto memory_readout = object_manager.realize_dict_gpu(memory_readout_map, alloc);
 
+    // DEBUG: 输出 memory_readout 的统计信息
+    if (memory_readout.IsTensor())
+    {
+        auto mr_shape = GA::shape(memory_readout);
+        cv::Mat mr_cpu = alloc.download(memory_readout);
+        float* mr_ptr = mr_cpu.ptr<float>();
+        int64_t mr_size = GA::numel(mr_shape);
+        float mr_min = *std::min_element(mr_ptr, mr_ptr + mr_size);
+        float mr_max = *std::max_element(mr_ptr, mr_ptr + mr_size);
+        float mr_mean = std::accumulate(mr_ptr, mr_ptr + mr_size, 0.0f) / mr_size;
+        logger->debug("[DEBUG] memory_readout shape=[{},{},{},{},{}], range=[{:.4f},{:.4f}], mean={:.4f}",
+                      mr_shape[0], mr_shape[1], mr_shape[2], mr_shape[3], mr_shape[4],
+                      mr_min, mr_max, mr_mean);
+    }
+
     // Segment using mask decoder
     auto sensory_in = memory->get_sensory(object_manager.all_obj_ids());
 
+    // DEBUG: 输出 sensory_in 的统计信息
+    if (sensory_in.IsTensor())
+    {
+        auto sensory_shape = GA::shape(sensory_in);
+        cv::Mat sensory_cpu = alloc.download(sensory_in);
+        float* sensory_ptr = sensory_cpu.ptr<float>();
+        int64_t sensory_size = GA::numel(sensory_shape);
+        float sensory_min = *std::min_element(sensory_ptr, sensory_ptr + sensory_size);
+        float sensory_max = *std::max_element(sensory_ptr, sensory_ptr + sensory_size);
+        float sensory_mean = std::accumulate(sensory_ptr, sensory_ptr + sensory_size, 0.0f) / sensory_size;
+        logger->debug("[DEBUG] sensory_in shape=[{},{},{},{},{}], range=[{:.6f},{:.6f}], mean={:.6f}",
+                      sensory_shape[0], sensory_shape[1], sensory_shape[2], sensory_shape[3], sensory_shape[4],
+                      sensory_min, sensory_max, sensory_mean);
+    }
+
     auto seg_result = network->segment(feat.f8, feat.f4, memory_readout, sensory_in);
+
+    // DEBUG: 输出 seg_result.logits 的统计信息
+    if (seg_result.logits.IsTensor())
+    {
+        auto logits_shape = GA::shape(seg_result.logits);
+        cv::Mat logits_cpu = alloc.download(seg_result.logits);
+        float* logits_ptr = logits_cpu.ptr<float>();
+        int64_t logits_size = GA::numel(logits_shape);
+        float logits_min = *std::min_element(logits_ptr, logits_ptr + logits_size);
+        float logits_max = *std::max_element(logits_ptr, logits_ptr + logits_size);
+        float logits_mean = std::accumulate(logits_ptr, logits_ptr + logits_size, 0.0f) / logits_size;
+        logger->debug("[DEBUG] seg_result.logits shape=[{},{},{},{}], range=[{:.4f},{:.4f}], mean={:.4f}",
+                      logits_shape[0], logits_shape[1], logits_shape[2], logits_shape[3],
+                      logits_min, logits_max, logits_mean);
+    }
 
     if (update_sensory)
     {
@@ -229,6 +326,22 @@ Ort::Value InferenceCore::Impl::segment(ImageFeatureStore::CachedFeatures& feat,
 
     // Sigmoid → prob
     auto prob_no_bg = ortcore::gpu_sigmoid(alloc, logits_clone);
+
+    // DEBUG: 输出 sigmoid 后的统计信息
+    {
+        auto prob_shape = GA::shape(prob_no_bg);
+        cv::Mat prob_cpu = alloc.download(prob_no_bg);
+        float* prob_ptr = prob_cpu.ptr<float>();
+        int64_t prob_size = GA::numel(prob_shape);
+        float prob_min = *std::min_element(prob_ptr, prob_ptr + prob_size);
+        float prob_max = *std::max_element(prob_ptr, prob_ptr + prob_size);
+        float prob_mean = std::accumulate(prob_ptr, prob_ptr + prob_size, 0.0f) / prob_size;
+        int fg_count = std::count_if(prob_ptr, prob_ptr + prob_size, [](float v) { return v > 0.5f; });
+        logger->debug("[DEBUG] prob_no_bg (sigmoid) shape=[{},{},{}], range=[{:.6f},{:.6f}], mean={:.6f}, fg(>0.5)={}/{} ({:.1f}%)",
+                      prob_shape[0], prob_shape[1], prob_shape[2],
+                      prob_min, prob_max, prob_mean,
+                      fg_count, prob_size, fg_count * 100.0f / prob_size);
+    }
 
     // Aggregate: add background, convert to logits (no softmax yet)
     auto logits_with_bg = ortcore::gpu_aggregate_logits(alloc, prob_no_bg);
