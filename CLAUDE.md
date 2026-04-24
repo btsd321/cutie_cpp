@@ -4,7 +4,11 @@
 
 ## 项目概述
 
-cutie-cpp 是 [Cutie](https://github.com/hkchengrex/Cutie) 视频目标分割（VOS）模型的 C++17 推理库。它将 PyTorch 推理流程移植为纯 C++ 共享库（`libcutie.so`），无需任何 Python 依赖，支持 ONNX Runtime（含 CUDA EP）以及可选的 TensorRT 后端。项目遵循 [lite.ai.toolkit](https://github.com/xlite-dev/lite.ai.toolkit) 的代码规范。
+cutie-cpp 是 [Cutie](https://github.com/hkchengrex/Cutie) 视频目标分割（VOS）模型的 C++17 推理库。它将 PyTorch 推理流程移植为纯 C++ 共享库（`libcutie.so`），无需任何 Python 依赖。
+
+**支持的推理后端：**
+- **ONNX Runtime**（默认）：含 CUDA EP，兼容性好
+- **TensorRT**（可选）：高性能推理，支持 FP16/INT8 量化，智能引擎缓存
 
 ## 构建命令
 
@@ -24,7 +28,10 @@ bash build.sh --clean
 bash build.sh --cuda-root /usr/local/cuda --onnxruntime-root /opt/onnxruntime
 
 # 启用 TensorRT 后端
-bash build.sh --enable-tensorrt
+bash build.sh --enable-tensorrt --vcpkg-root ./vcpkg/
+
+# 同时启用两个后端
+bash build.sh --enable-onnxruntime --enable-tensorrt --vcpkg-root ./vcpkg/
 
 # 构建后安装
 bash install.sh
@@ -55,12 +62,16 @@ Cutie 模型被拆分为 6 个 ONNX 子模块，每帧按顺序调用：
 
 ### 代码组织
 
+- **`src/common/`** — GPU 公共代码（ORT 和 TRT 后端共享）：
+  - `cuda_kernels.cu` — CUDA kernel 实现（concat、slice、sigmoid、aggregate_softmax、get_similarity、top_k_softmax、one_hot、mask_merge、fill_zero、copy_d2d 等张量操作）
+  - `gpu_memory.cpp` — GPU 内存分配器（Ort::Value GPU 内存管理、GpuMat 零拷贝转换、CPU↔GPU 数据传输）
+  - `gpu_tensor_ops.cpp` — GPU 张量操作原语（相似度计算、softmax、记忆读出 readout、特征聚合 aggregate、sigmoid、stack/split 等，供 KeyValueMemoryStore 和 MemoryManager 调用）
+  - `gpu_image_preprocess.cu` — GPU 图像预处理（BGR→RGB、resize、归一化、pad）
+  - `gpu_mask_preprocess.cu` — GPU 掩码预处理
+  - `gpu_postprocess.cu` — GPU 后处理
 - **`src/core/`** — 与平台无关的推理逻辑：`inference_core.cpp`（主循环）、`memory_manager.cpp`、`kv_memory_store.cpp`、`object_manager.cpp`、`processor.cpp`（公共 API 实现）
 - **`src/ort/`** — ONNX Runtime 后端：`ort_handler.cpp`（会话管理）、`ort_cutie.cpp`（子模块封装）
-- **`src/ort/core/cuda_kernels.cu`** — CUDA kernel 实现（concat、slice、sigmoid、aggregate_softmax、get_similarity、top_k_softmax、one_hot、mask_merge、fill_zero、copy_d2d 等张量操作）
-- **`src/ort/core/gpu_memory.cpp`** — GPU 内存分配器（Ort::Value GPU 内存管理、GpuMat 零拷贝转换、CPU↔GPU 数据传输）
-- **`src/ort/core/gpu_tensor_ops.cpp`** — GPU 张量操作原语（相似度计算、softmax、记忆读出 readout、特征聚合 aggregate、sigmoid、stack/split 等，供 KeyValueMemoryStore 和 MemoryManager 调用）
-- **`src/trt/`** — TensorRT 后端（与 ort/ 目录结构对应）
+- **`src/trt/`** — TensorRT 后端：`trt_engine_builder.cpp`（引擎构建）、`trt_handler.cpp`（引擎管理）、`trt_cutie.cpp`（子模块封装）
 - **`include/cutie/`** — 公共 API 头文件，入口为 `cutie.h`
 - **`include/cutie/core/processor.h`** — `CutieConfig` 结构体和 `CutieProcessor` 类声明
 
@@ -69,10 +80,12 @@ Cutie 模型被拆分为 6 个 ONNX 子模块，每帧按顺序调用：
 - **PIMPL**：`CutieProcessor` 使用 `std::unique_ptr<Impl>` 隐藏内部实现
 - **命名空间别名**：公共 API 位于 `cutie::cv::segmentation::CutieProcessor`（lite.ai.toolkit 规范）
 - **编译期后端选择**：CMake 选项 `ENABLE_ONNXRUNTIME` / `ENABLE_TENSORRT` 控制编译哪套源文件，由 `#ifdef ENABLE_*` 预处理宏保护
+- **代码复用**：GPU 公共代码（CUDA kernels、内存管理、张量操作）在 `src/common/` 中共享，ORT 和 TRT 后端均可使用
 - **`CutieProcessor` 有状态且非线程安全** — 每路视频流使用独立实例
-- **IO Binding**：`OrtCutie` 使用 ONNX Runtime IO Binding API，所有子模块的输入输出直接绑定 GPU 内存，避免 CPU↔GPU 数据拷贝
+- **IO Binding（ORT）**：`OrtCutie` 使用 ONNX Runtime IO Binding API，所有子模块的输入输出直接绑定 GPU 内存，避免 CPU↔GPU 数据拷贝
+- **智能引擎缓存（TRT）**：`TrtEngineBuilder` 首次构建引擎后序列化到 `.engine` 文件，后续直接加载（节省 10-60 秒启动时间）
 - **全 GPU 数据流**：输入图像 CPU→GPU 上传后，所有中间特征和内存数据（f16/f8/f4/pix_feat、KV 记忆、sensory memory、obj_v）保持在 GPU，仅最终 logits 在输出阶段下载到 CPU
-- **输入预处理 GPU 化**：`GpuMemoryAllocator::preprocess_image_gpu()` 将 BGR→RGB 转换、resize、ImageNet 归一化、pad 全部在 GPU 上完成（`cv::cuda::cvtColor` / `cv::cuda::resize` / `cv::cuda::copyMakeBorder`）；resize 目标尺寸优先从 ONNX 模型参数读取（`model_h_` / `model_w_`），若模型为动态分辨率（`model_h_` ≤ 0）则回退到 `max_internal_size` 等比缩放逻辑；`InferenceCore` 缓存 GPU 图像张量（`cached_image_gpu_`），避免同一帧重复上传；`ensure_features()` 和 `add_memory()` 不再接收 CPU `image_blob`
+- **输入预处理 GPU 化**：`GpuMemoryAllocator::preprocess_image_gpu()` 将 BGR→RGB 转换、resize、ImageNet 归一化、pad 全部在 GPU 上完成（`cv::cuda::cvtColor` / `cv::cuda::resize` / `cv::cuda::copyMakeBorder`）；resize 目标尺寸优先从模型参数读取（`model_h_` / `model_w_`），若模型为动态分辨率（`model_h_` ≤ 0）则回退到 `max_internal_size` 等比缩放逻辑；`InferenceCore` 缓存 GPU 图像张量（`cached_image_gpu_`），避免同一帧重复上传；`ensure_features()` 和 `add_memory()` 不再接收 CPU `image_blob`
 
 ### 依赖项
 
