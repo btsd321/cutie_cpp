@@ -21,17 +21,6 @@
  * 以及与 cv::cuda::GpuMat 的零拷贝转换。
  */
 
-#ifndef CUTIE_ORT_CORE_GPU_MEMORY_H
-#define CUTIE_ORT_CORE_GPU_MEMORY_H
-
-#include <cstdint>
-#include <vector>
-
-#include <opencv2/core.hpp>
-#include <opencv2/core/cuda.hpp>
-
-#include "cutie/ort/core/ort_config.h"
-
 namespace cutie
 {
 namespace ortcore

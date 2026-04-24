@@ -74,3 +74,5 @@ docs/html/
 docs/latex/
 docs/man/
 docs/xml/
+
+build.log

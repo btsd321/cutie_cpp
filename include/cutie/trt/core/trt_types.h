@@ -23,7 +23,7 @@ struct TrtDeleter
     template <typename T>
     void operator()(T* obj) const
     {
-        if (obj) obj->destroy();
+        if (obj) delete obj;
     }
 };
 

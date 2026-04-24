@@ -105,11 +105,9 @@ TrtUniquePtr<nvinfer1::ICudaEngine> TrtEngineBuilder::build_from_onnx(
 
     logger_->info("TrtEngineBuilder: 开始从 ONNX 构建引擎: {}", onnx_path);
 
-    // 创建网络定义（显式 batch 模式）
-    const auto explicit_batch =
-        1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
+    // 创建网络定义（TensorRT 10.x 默认使用显式 batch）
     TrtUniquePtr<nvinfer1::INetworkDefinition> network(
-        builder_->createNetworkV2(explicit_batch));
+        builder_->createNetworkV2(0U));
     if (!network)
     {
         logger_->error("TrtEngineBuilder: 创建 INetworkDefinition 失败");
@@ -153,32 +151,32 @@ TrtUniquePtr<nvinfer1::ICudaEngine> TrtEngineBuilder::build_from_onnx(
     logger_->debug("TrtEngineBuilder: 工作空间大小 = {} MB",
                    config.max_workspace_size / (1024 * 1024));
 
-    // 启用 FP16 精度
+    // 启用 FP16 精度（TensorRT 10.x 使用新 API）
     if (config.enable_fp16)
     {
-        if (builder_->platformHasFastFp16())
+        builder_config->setFlag(nvinfer1::BuilderFlag::kPREFER_PRECISION_CONSTRAINTS);
+        builder_config->setFlag(nvinfer1::BuilderFlag::kOBEY_PRECISION_CONSTRAINTS);
+        // 设置默认精度为 FP16
+        for (int i = 0; i < network->getNbLayers(); ++i)
         {
-            builder_config->setFlag(nvinfer1::BuilderFlag::kFP16);
-            logger_->info("TrtEngineBuilder: 启用 FP16 精度");
+            auto layer = network->getLayer(i);
+            layer->setPrecision(nvinfer1::DataType::kHALF);
         }
-        else
-        {
-            logger_->warn("TrtEngineBuilder: 平台不支持 FP16，回退到 FP32");
-        }
+        logger_->info("TrtEngineBuilder: 启用 FP16 精度");
     }
 
-    // 启用 INT8 精度
+    // 启用 INT8 精度（TensorRT 10.x 使用新 API）
     if (config.enable_int8)
     {
-        if (builder_->platformHasFastInt8())
+        builder_config->setFlag(nvinfer1::BuilderFlag::kPREFER_PRECISION_CONSTRAINTS);
+        builder_config->setFlag(nvinfer1::BuilderFlag::kOBEY_PRECISION_CONSTRAINTS);
+        // 设置默认精度为 INT8
+        for (int i = 0; i < network->getNbLayers(); ++i)
         {
-            builder_config->setFlag(nvinfer1::BuilderFlag::kINT8);
-            logger_->info("TrtEngineBuilder: 启用 INT8 精度");
+            auto layer = network->getLayer(i);
+            layer->setPrecision(nvinfer1::DataType::kINT8);
         }
-        else
-        {
-            logger_->warn("TrtEngineBuilder: 平台不支持 INT8，回退到 FP32");
-        }
+        logger_->info("TrtEngineBuilder: 启用 INT8 精度");
     }
 
     // 构建序列化网络
