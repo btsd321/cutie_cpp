@@ -20,8 +20,9 @@ ENABLE_TENSORRT="OFF"
 BUILD_EXAMPLES="ON"
 
 # Model options
-DOWNLOAD_MODELS="ON"
+DOWNLOAD_MODELS="OFF"
 EXPORT_ONNX="OFF"
+EXPORT_TENSORRT="OFF"
 PYTHON_EXECUTABLE=""
 NUM_OBJECTS="2"
 
@@ -57,6 +58,8 @@ Model options:
   --no-download-models     Skip .pth weight download
   --export-onnx            Auto-export ONNX submodules at build time (default: OFF)
   --no-export-onnx         Skip ONNX export (default)
+  --export-tensorrt        Auto-export TensorRT engines at build time (default: OFF)
+  --no-export-tensorrt     Skip TensorRT export (default)
 EOF
     exit 0
 }
@@ -79,9 +82,11 @@ while [[ $# -gt 0 ]]; do
         --num-objects)       NUM_OBJECTS="$2";       shift 2 ;;
         --download-models)   DOWNLOAD_MODELS="ON";   shift   ;;
         --no-download-models) DOWNLOAD_MODELS="OFF"; shift   ;;
-        --export-onnx)       EXPORT_ONNX="ON";       shift   ;;
-        --no-export-onnx)    EXPORT_ONNX="OFF";      shift   ;;
-        --debug)             BUILD_TYPE="Debug";       shift   ;;
+        --export-onnx)       EXPORT_ONNX="ON";         shift   ;;
+        --no-export-onnx)    EXPORT_ONNX="OFF";        shift   ;;
+        --export-tensorrt)   EXPORT_TENSORRT="ON";     shift   ;;
+        --no-export-tensorrt) EXPORT_TENSORRT="OFF";   shift   ;;
+        --debug)             BUILD_TYPE="Debug";               shift   ;;
         --clean)
             echo "Cleaning build directory: ${BUILD_DIR}"
             rm -rf "${BUILD_DIR}"
@@ -100,6 +105,7 @@ CMAKE_ARGS=(
     -DBUILD_EXAMPLES="${BUILD_EXAMPLES}"
     -DDOWNLOAD_MODELS="${DOWNLOAD_MODELS}"
     -DEXPORT_ONNX="${EXPORT_ONNX}"
+    -DEXPORT_TENSORRT="${EXPORT_TENSORRT}"
     -DNUM_OBJECTS="${NUM_OBJECTS}"
 )
 [[ -n "${PYTHON_EXECUTABLE}" ]] && CMAKE_ARGS+=(-DPYTHON_EXECUTABLE="${PYTHON_EXECUTABLE}")
@@ -142,8 +148,9 @@ echo "  TRT:         ${ENABLE_TENSORRT}"
 echo "  Examples:    ${BUILD_EXAMPLES}"
 echo "  DlModels:    ${DOWNLOAD_MODELS}"
 echo "  ExportONNX:  ${EXPORT_ONNX}"
+echo "  ExportTRT:   ${EXPORT_TENSORRT}"
 echo "  NumObjects:  ${NUM_OBJECTS}"
-[[ -n "${PYTHON_EXECUTABLE}" ]] && echo "  Python:      ${PYTHON_EXECUTABLE}"
+echo "  Python:      ${PYTHON_EXECUTABLE:-auto-detect}"
 echo "  Jobs:        ${JOBS}"
 [[ -n "${VCPKG_ROOT}" ]]       && echo "  vcpkg:       ${VCPKG_ROOT}"
 [[ -n "${CUDA_ROOT}" ]]        && echo "  CUDA:        ${CUDA_ROOT}"

@@ -25,6 +25,7 @@ option(ENABLE_TENSORRT    "Build with TensorRT backend"    OFF)
 option(BUILD_EXAMPLES     "Build example programs"          ON)
 option(DOWNLOAD_MODELS    "Download .pth model weights at build time" ON)
 option(EXPORT_ONNX        "Auto-export ONNX submodules at build time if missing" OFF)
+option(EXPORT_TENSORRT    "Auto-export TensorRT engines at build time if missing"  OFF)
 set(PYTHON_EXECUTABLE     "" CACHE STRING "Python interpreter path (default: auto-detect)")
 set(NUM_OBJECTS           "2" CACHE STRING "Number of objects for TensorRT engine export")
 
@@ -256,22 +257,28 @@ endif()
 if(ENABLE_TENSORRT)
     set(CUTIE_TRT_STAMP         "${CUTIE_MODEL_SOURCE_DIR}/.trt_export_complete")
     set(CUTIE_EXPORT_TRT_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/share/scripts/export_tensorrt.py")
-    add_custom_command(
-        OUTPUT  "${CUTIE_TRT_STAMP}"
-        COMMAND ${CMAKE_COMMAND}
-            -DMODEL_DIR="${CUTIE_MODEL_SOURCE_DIR}"
-            -DMODEL_PREFIX="${CUTIE_MODEL_PREFIX}"
-            -DNUM_OBJECTS="${NUM_OBJECTS}"
-            -DPYTHON_EXE="${_python_exe}"
-            -DEXPORT_SCRIPT="${CUTIE_EXPORT_TRT_SCRIPT}"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/export_trt_if_needed.cmake"
-        COMMAND ${CMAKE_COMMAND} -E touch "${CUTIE_TRT_STAMP}"
-        DEPENDS export_onnx
-        COMMENT "Checking / exporting TensorRT engines..."
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    )
-    add_custom_target(export_tensorrt DEPENDS "${CUTIE_TRT_STAMP}")
-    add_dependencies(cutie export_tensorrt)
+    if(EXPORT_TENSORRT)
+        add_custom_command(
+            OUTPUT  "${CUTIE_TRT_STAMP}"
+            COMMAND ${CMAKE_COMMAND}
+                -DMODEL_DIR="${CUTIE_MODEL_SOURCE_DIR}"
+                -DMODEL_PREFIX="${CUTIE_MODEL_PREFIX}"
+                -DNUM_OBJECTS="${NUM_OBJECTS}"
+                -DPYTHON_EXE="${_python_exe}"
+                -DEXPORT_SCRIPT="${CUTIE_EXPORT_TRT_SCRIPT}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/export_trt_if_needed.cmake"
+            COMMAND ${CMAKE_COMMAND} -E touch "${CUTIE_TRT_STAMP}"
+            DEPENDS export_onnx
+            COMMENT "Checking / exporting TensorRT engines..."
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+        add_custom_target(export_tensorrt DEPENDS "${CUTIE_TRT_STAMP}")
+        add_dependencies(cutie export_tensorrt)
+    else()
+        add_custom_target(export_tensorrt
+            COMMENT "TensorRT export skipped (EXPORT_TENSORRT=OFF)"
+        )
+    endif()
 endif()
 
 # === 示例 ===
