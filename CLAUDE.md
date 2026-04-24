@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-cutie-cpp 是 [Cutie](https://github.com/hkchengrex/Cutie) 视频目标分割（VOS）模型的 C++17 推理库。它将 PyTorch 推理流程移植为纯 C++ 共享库（`libcutie.so`），无需任何 Python 依赖。
+cutie-cpp 是 [Cutie](https://github.com/hkchengrex/Cutie) 视频目标分割（VOS）模型的 C++17 推理库。它将 PyTorch 推理流程移植为纯 C++ 共享库（`libcutie.so`），无需任何 Python 依赖。项目架构参考 [lite.ai.toolkit](https://github.com/xlite-dev/lite.ai.toolkit) 。
 
 **支持的推理后端：**
 - **ONNX Runtime**（默认）：含 CUDA EP，兼容性好
