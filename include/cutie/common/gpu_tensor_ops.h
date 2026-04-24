@@ -191,4 +191,4 @@ inline int64_t dim_size(const Ort::Value& t, int axis)
 }  // namespace ortcore
 }  // namespace cutie
 
-#endif  // CUTIE_ORT_CORE_GPU_TENSOR_OPS_H
+#endif  // CUTIE_COMMON_GPU_TENSOR_OPS_H
