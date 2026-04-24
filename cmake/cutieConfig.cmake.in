@@ -12,13 +12,16 @@ if(@ENABLE_ONNXRUNTIME@)
     if(NOT TARGET onnxruntime::onnxruntime)
         find_dependency(onnxruntime CONFIG QUIET)
         if(NOT onnxruntime_FOUND)
-            # 回退：自定义 Find 模块
+            # 回退：FindONNXRuntime.cmake 随本包一同安装，加入自身目录使 find_dependency 能定位到它
+            list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
             find_dependency(ONNXRuntime REQUIRED)
         endif()
     endif()
 endif()
 
 if(@ENABLE_TENSORRT@)
+    # FindTensorRT.cmake 随本包一同安装，加入自身目录使 find_dependency 能定位到它
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
     find_dependency(TensorRT REQUIRED)
 endif()
 

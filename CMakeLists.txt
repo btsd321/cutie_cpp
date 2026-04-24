@@ -336,6 +336,9 @@ write_basic_package_version_file(
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/cutieConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/cutieConfigVersion.cmake"
+    # Find 模块与 cutieConfig.cmake 同目录安装，供 find_dependency 回退使用
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindTensorRT.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindONNXRuntime.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/cutie"
 )
 
