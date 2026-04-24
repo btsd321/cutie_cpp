@@ -14,11 +14,11 @@
 #include "cutie/core/memory_manager.h"
 #include "cutie/core/object_manager.h"
 #include "cutie/core/processor.h"
-#include "cutie/ort/core/cuda_kernels.h"
-#include "cutie/ort/core/gpu_image_preprocess.h"
-#include "cutie/ort/core/gpu_mask_preprocess.h"
-#include "cutie/ort/core/gpu_postprocess.h"
-#include "cutie/ort/core/gpu_tensor_ops.h"
+#include "cutie/common/cuda_kernels.h"
+#include "cutie/common/gpu_image_preprocess.h"
+#include "cutie/common/gpu_mask_preprocess.h"
+#include "cutie/common/gpu_postprocess.h"
+#include "cutie/common/gpu_tensor_ops.h"
 #include "cutie/utils.h"
 
 #ifdef ENABLE_ONNXRUNTIME

@@ -1,7 +1,7 @@
 /// @file gpu_postprocess.cu
 /// GPU 后处理 kernel 实现：unpad + argmax index mask。
 
-#include "cutie/ort/core/gpu_postprocess.h"
+#include "cutie/common/gpu_postprocess.h"
 
 #include <cuda_runtime.h>
 

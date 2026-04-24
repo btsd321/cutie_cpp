@@ -13,7 +13,7 @@
 
 #include "cutie/core/inference_core.h"
 #include "cutie/core/processor.h"
-#include "cutie/ort/core/gpu_memory.h"
+#include "cutie/common/gpu_memory.h"
 #include "cutie/utils.h"
 
 namespace cutie

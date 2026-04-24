@@ -3,7 +3,7 @@
 #include <stdexcept>
 
 #include "cutie/core/object_manager.h"
-#include "cutie/ort/core/gpu_tensor_ops.h"
+#include "cutie/common/gpu_tensor_ops.h"
 
 namespace cutie
 {

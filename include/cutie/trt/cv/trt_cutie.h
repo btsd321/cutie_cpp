@@ -1,14 +1,13 @@
 /**
- * @file ort_cutie.h
- * @brief ONNX Runtime wrapper for Cutie model submodules.
+ * @file trt_cutie.h
+ * @brief TensorRT Cutie 模型封装
  *
- * Manages 6 ONNX Runtime sessions for the Cutie model pipeline.
- * All inputs and outputs are GPU Ort::Value tensors (CUDA memory).
- * Uses IO Binding for zero-copy GPU inference.
+ * 封装 6 个 TensorRT 子模块，提供与 OrtCutie 相同的接口。
+ * 管理完整的 Cutie 推理流程，支持全 GPU 数据流。
  */
 
-#ifndef CUTIE_ORT_CV_ORT_CUTIE_H
-#define CUTIE_ORT_CV_ORT_CUTIE_H
+#ifndef CUTIE_TRT_CV_TRT_CUTIE_H
+#define CUTIE_TRT_CV_TRT_CUTIE_H
 
 #include <memory>
 #include <string>
@@ -17,9 +16,9 @@
 
 #include <linden_logger/logger_interface.hpp>
 
-#include "cutie/common/gpu_memory.h"
+#include "cutie/ort/core/gpu_memory.h"
 #include "cutie/ort/core/ort_config.h"
-#include "cutie/ort/core/ort_utils.h"
+#include "cutie/trt/core/trt_handler.h"
 
 namespace cutie
 {
@@ -30,14 +29,14 @@ namespace core
 struct CutieConfig;
 }
 
-namespace ortcv
+namespace trtcv
 {
 
 /**
- * @class OrtCutie
- * @brief ONNX Runtime wrapper for Cutie model submodules.
+ * @class TrtCutie
+ * @brief TensorRT Cutie 模型封装
  *
- * Manages 6 ONNX Runtime sessions for the complete Cutie inference pipeline:
+ * 管理 6 个 TensorRT 引擎，实现完整的 Cutie 推理流程：
  * 1. **pixel_encoder** - Image → multi-scale features + pixel features
  * 2. **key_projection** - f16 → key, shrinkage, selection
  * 3. **mask_encoder** - Image + features + sensory + masks → value, sensory, summaries
@@ -45,13 +44,10 @@ namespace ortcv
  * 5. **object_transformer** - Refines readout with object queries
  * 6. **mask_decoder** - Decodes final mask + sensory update
  *
- * All inputs and outputs are GPU Ort::Value tensors (CUDA memory).
- * Uses IO Binding for zero-copy GPU inference.
- *
- * 管理 6 个 ONNX Runtime 会话，实现完整的 Cutie 推理流程。
  * 所有张量操作都在 GPU 上进行，支持零拷贝推理。
+ * 提供与 OrtCutie 相同的接口，便于后端切换。
  */
-class OrtCutie
+class TrtCutie
 {
 public:
     // ── Result Structures ───────────────────────────────────────────
@@ -103,20 +99,22 @@ public:
     // ── Construction ────────────────────────────────────────────────
 
     /**
-     * @brief Construct OrtCutie and load all submodule models.
+     * @brief Construct TrtCutie and load all submodule engines.
+     *
+     * 从 ONNX 模型构建或加载缓存的 TensorRT 引擎。
      *
      * @param config Cutie configuration (contains model paths)
      * @param logger Optional logger instance
-     * @throws std::runtime_error if model loading fails
+     * @throws std::runtime_error if engine loading fails
      */
-    explicit OrtCutie(const core::CutieConfig& config,
+    explicit TrtCutie(const core::CutieConfig& config,
                       std::shared_ptr<linden::log::ILogger> logger = nullptr);
-    ~OrtCutie();
+    ~TrtCutie();
 
-    OrtCutie(const OrtCutie&) = delete;
-    OrtCutie& operator=(const OrtCutie&) = delete;
-    OrtCutie(OrtCutie&&) noexcept;
-    OrtCutie& operator=(OrtCutie&&) noexcept;
+    TrtCutie(const TrtCutie&) = delete;
+    TrtCutie& operator=(const TrtCutie&) = delete;
+    TrtCutie(TrtCutie&&) noexcept;
+    TrtCutie& operator=(TrtCutie&&) noexcept;
 
     // ── Submodule Inference Methods (GPU in/out) ───────────────────
 
@@ -220,7 +218,7 @@ public:
     /**
      * @brief Get expected input height of pixel encoder.
      *
-     * 获取像素编码器的预期输入高度（从 ONNX 模型元数据读取）。
+     * 获取像素编码器的预期输入高度（从模型元数据读取）。
      *
      * @return Input height (0 if dynamic)
      */
@@ -229,57 +227,32 @@ public:
     /**
      * @brief Get expected input width of pixel encoder.
      *
-     * 获取像素编码器的预期输入宽度（从 ONNX 模型元数据读取）。
+     * 获取像素编码器的预期输入宽度（从模型元数据读取）。
      *
      * @return Input width (0 if dynamic)
      */
     int model_input_w() const { return model_w_; }
 
 private:
-    struct SessionBundle;  ///< Internal session wrapper (fwd decl)
-    using SessionPtr = std::unique_ptr<SessionBundle>;
-
-    std::shared_ptr<linden::log::ILogger> logger_;  ///< Logger (must be before env_)
-    Ort::Env env_;  ///< ONNX Runtime environment
-    std::unique_ptr<ortcore::GpuMemoryAllocator> gpu_alloc_;  ///< GPU memory allocator
+    std::shared_ptr<linden::log::ILogger> logger_;
+    std::unique_ptr<ortcore::GpuMemoryAllocator> gpu_alloc_;
 
     int model_h_ = 0;  ///< Model input height
     int model_w_ = 0;  ///< Model input width
     int model_n_obj_ = 0;  ///< Model max objects
 
-    // ONNX Runtime sessions for each submodule
-    SessionPtr pixel_encoder_;  ///< Pixel encoder session
-    SessionPtr key_projection_;  ///< Key projection session
-    SessionPtr mask_encoder_;  ///< Mask encoder session
-    SessionPtr pixel_fuser_;  ///< Pixel fuser session
-    SessionPtr object_transformer_;  ///< Object transformer session
-    SessionPtr mask_decoder_;  ///< Mask decoder session
+    // TensorRT handlers for each submodule
+    std::unique_ptr<trtcore::TrtHandler> pixel_encoder_;
+    std::unique_ptr<trtcore::TrtHandler> key_projection_;
+    std::unique_ptr<trtcore::TrtHandler> mask_encoder_;
+    std::unique_ptr<trtcore::TrtHandler> pixel_fuser_;
+    std::unique_ptr<trtcore::TrtHandler> object_transformer_;
+    std::unique_ptr<trtcore::TrtHandler> mask_decoder_;
 
-    /**
-     * @brief Create ONNX Runtime session for model file.
-     *
-     * 创建 ONNX Runtime 会话。
-     *
-     * @param onnx_path Path to ONNX model file
-     * @param device_id GPU device ID
-     * @return Session wrapper
-     */
-    SessionPtr create_session(const std::string& onnx_path, int device_id);
-
-    /**
-     * @brief Run session using IO Binding (GPU in/out).
-     *
-     * 使用 IO Binding 运行会话，实现零拷贝 GPU 推理。
-     *
-     * @param bundle Session bundle
-     * @param inputs Input tensors
-     * @return Output tensors
-     */
-    std::vector<Ort::Value> run_session(SessionBundle& bundle,
-                                        std::vector<Ort::Value>& inputs);
+    cudaStream_t stream_ = nullptr;  ///< CUDA stream for inference
 };
 
-}  // namespace ortcv
+}  // namespace trtcv
 }  // namespace cutie
 
-#endif  // CUTIE_ORT_CV_ORT_CUTIE_H
+#endif  // CUTIE_TRT_CV_TRT_CUTIE_H

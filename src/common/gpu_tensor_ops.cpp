@@ -7,8 +7,8 @@
  * All operations use CUDA kernels and cuBLAS for efficient GPU computation.
  */
 
-#include "cutie/ort/core/gpu_tensor_ops.h"
-#include "cutie/ort/core/cuda_kernels.h"
+#include "cutie/common/gpu_tensor_ops.h"
+#include "cutie/common/cuda_kernels.h"
 
 #include <cublas_v2.h>
 #include <cuda_runtime.h>

@@ -1,7 +1,7 @@
 /// @file gpu_buffer.cpp
 /// GpuBuffer 实现：RAII 持久化 GPU 内存块。
 
-#include "cutie/ort/core/gpu_buffer.h"
+#include "cutie/common/gpu_buffer.h"
 
 #include <cstdio>
 #include <utility>

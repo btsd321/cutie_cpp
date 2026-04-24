@@ -17,8 +17,8 @@
 
 #include "cutie/core/kv_memory_store.h"
 #include "cutie/core/object_manager.h"
-#include "cutie/ort/core/gpu_memory.h"
-#include "cutie/ort/core/gpu_tensor_ops.h"
+#include "cutie/common/gpu_memory.h"
+#include "cutie/common/gpu_tensor_ops.h"
 #include "cutie/types.h"
 
 namespace cutie

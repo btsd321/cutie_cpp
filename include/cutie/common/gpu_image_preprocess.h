@@ -9,8 +9,8 @@
 #include <opencv2/core.hpp>
 #include <opencv2/core/cuda.hpp>
 
-#include "cutie/ort/core/gpu_buffer.h"
-#include "cutie/ort/core/gpu_memory.h"
+#include "cutie/common/gpu_buffer.h"
+#include "cutie/common/gpu_memory.h"
 
 /// @file gpu_image_preprocess.h
 /// 融合 GPU 图像预处理：单 CUDA kernel 完成 bilinear resize + pad + BGR→RGB

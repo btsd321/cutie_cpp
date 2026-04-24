@@ -5,7 +5,7 @@
 #include <stdexcept>
 
 #include "cutie/core/kv_memory_store.h"
-#include "cutie/ort/core/cuda_kernels.h"
+#include "cutie/common/cuda_kernels.h"
 
 namespace cutie
 {

@@ -1,4 +1,4 @@
-#include "cutie/ort/core/cuda_kernels.h"
+#include "cutie/common/cuda_kernels.h"
 
 #include <cuda_runtime.h>
 

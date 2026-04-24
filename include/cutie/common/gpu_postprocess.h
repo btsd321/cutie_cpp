@@ -8,7 +8,7 @@
 #include <cuda_runtime.h>
 #include <opencv2/core/cuda.hpp>
 
-#include "cutie/ort/core/gpu_memory.h"
+#include "cutie/common/gpu_memory.h"
 #include "cutie/types.h"
 
 /// @file gpu_postprocess.h

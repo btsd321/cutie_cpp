@@ -19,7 +19,7 @@
 
 #include <opencv2/core.hpp>
 
-#include "cutie/ort/core/gpu_memory.h"
+#include "cutie/common/gpu_memory.h"
 #include "cutie/types.h"
 
 namespace cutie

@@ -24,7 +24,7 @@ option(ENABLE_ONNXRUNTIME "Build with ONNXRuntime backend" ON)
 option(ENABLE_TENSORRT    "Build with TensorRT backend"    OFF)
 option(BUILD_EXAMPLES     "Build example programs"          ON)
 option(DOWNLOAD_MODELS    "Download .pth model weights at build time" ON)
-option(EXPORT_ONNX        "Auto-export ONNX submodules at build time if missing" ON)
+option(EXPORT_ONNX        "Auto-export ONNX submodules at build time if missing" OFF)
 set(PYTHON_EXECUTABLE     "" CACHE STRING "Python interpreter path (default: auto-detect)")
 set(NUM_OBJECTS           "2" CACHE STRING "Number of objects for TensorRT engine export")
 
@@ -133,18 +133,22 @@ set(CUTIE_CORE_SOURCES
     src/utils.cpp
 )
 
+# GPU 公共源文件（ORT 和 TRT 共享）
+set(CUTIE_COMMON_GPU_SOURCES
+    src/common/cuda_kernels.cu
+    src/common/gpu_buffer.cpp
+    src/common/gpu_memory.cpp
+    src/common/gpu_tensor_ops.cpp
+    src/common/gpu_image_preprocess.cu
+    src/common/gpu_postprocess.cu
+    src/common/gpu_mask_preprocess.cu
+)
+
 set(CUTIE_ORT_SOURCES "")
 if(ENABLE_ONNXRUNTIME)
     list(APPEND CUTIE_ORT_SOURCES
         src/ort/core/ort_handler.cpp
         src/ort/core/ort_utils.cpp
-        src/ort/core/gpu_buffer.cpp
-        src/ort/core/gpu_memory.cpp
-        src/ort/core/gpu_tensor_ops.cpp
-        src/ort/core/cuda_kernels.cu
-        src/ort/core/gpu_image_preprocess.cu
-        src/ort/core/gpu_postprocess.cu
-        src/ort/core/gpu_mask_preprocess.cu
         src/ort/cv/ort_cutie.cpp
     )
 endif()
@@ -152,8 +156,8 @@ endif()
 set(CUTIE_TRT_SOURCES "")
 if(ENABLE_TENSORRT)
     list(APPEND CUTIE_TRT_SOURCES
+        src/trt/core/trt_engine_builder.cpp
         src/trt/core/trt_handler.cpp
-        src/trt/core/trt_utils.cpp
         src/trt/cv/trt_cutie.cpp
     )
 endif()
@@ -161,6 +165,7 @@ endif()
 # === 库 ===
 add_library(cutie SHARED
     ${CUTIE_CORE_SOURCES}
+    ${CUTIE_COMMON_GPU_SOURCES}
     ${CUTIE_ORT_SOURCES}
     ${CUTIE_TRT_SOURCES}
 )
@@ -188,10 +193,10 @@ if(ENABLE_ONNXRUNTIME)
 endif()
 
 if(ENABLE_TENSORRT)
-    target_include_directories(cutie PRIVATE ${CUDA_INCLUDE_DIRS} ${TensorRT_INCLUDE_DIRS})
+    target_include_directories(cutie PRIVATE ${TensorRT_INCLUDE_DIRS})
     target_link_libraries(cutie PRIVATE
-        ${TensorRT_LIBRARIES}
-        ${CUDA_LIBRARIES}
+        TensorRT::nvinfer
+        TensorRT::nvonnxparser
     )
     target_compile_definitions(cutie PRIVATE ENABLE_TENSORRT)
 endif()

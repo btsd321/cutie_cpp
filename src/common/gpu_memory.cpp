@@ -7,8 +7,8 @@
  * Includes image preprocessing and tensor manipulation on GPU.
  */
 
-#include "cutie/ort/core/gpu_memory.h"
-#include "cutie/ort/core/cuda_kernels.h"
+#include "cutie/common/gpu_memory.h"
+#include "cutie/common/cuda_kernels.h"
 
 #include <cuda_runtime.h>
 

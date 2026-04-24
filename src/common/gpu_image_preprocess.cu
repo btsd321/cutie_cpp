@@ -2,7 +2,7 @@
 /// 融合 GPU 图像预处理实现：单 kernel 完成 bilinear resize + pad + BGR→RGB
 /// + /255 + ImageNet normalize + HWC→CHW。
 
-#include "cutie/ort/core/gpu_image_preprocess.h"
+#include "cutie/common/gpu_image_preprocess.h"
 
 #include <cuda_runtime.h>
 

@@ -1,9 +1,9 @@
 /// @file gpu_mask_preprocess.cu
 /// GPU mask 预处理 kernel 实现：nearest resize + pad + one_hot + aggregate。
 
-#include "cutie/ort/core/gpu_mask_preprocess.h"
-#include "cutie/ort/core/cuda_kernels.h"
-#include "cutie/ort/core/gpu_tensor_ops.h"
+#include "cutie/common/gpu_mask_preprocess.h"
+#include "cutie/common/cuda_kernels.h"
+#include "cutie/common/gpu_tensor_ops.h"
 
 #include <cuda_runtime.h>
 
