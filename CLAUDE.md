@@ -83,9 +83,14 @@ Cutie 模型被拆分为 6 个 ONNX 子模块，每帧按顺序调用：
 - **cuBLAS**：CUDA 矩阵运算库（CUDA Toolkit 自带，用于 GPU 端张量计算）
 - **TensorRT（≥ 8.6）**：可选的高性能后端
 
-## 代码风格
-
-配置文件为 `.clang-format`：基于 Google 风格，使用 Allman 大括号，4 空格缩进，行宽限制 100 列。使用 `clang-format -i <file>` 格式化。
+## 编程规范
+1. 所有cpp、hpp文件开头要描述文件作用、注意事项(Doxygen风格没有可不写)
+2. 所有函数要配置Doxygen注释
+3. 注释使用中文，关键代码块前、头文件中的函数成员变量、关键宏等都要加注释
+4. cpp日志使用[专有日志库](../thirdparty/linden_logger/README.md)，禁止直接用ROS2的函数或者std::cout打印, 关键路径要加debug或info打印，高频用debug，低频用info
+5. 代码风格见[格式化文件](../.clang-format)
+6. 模块化开发，不要一个文件、一个函数写所有，开发功能之前先规划合适的接口和存放位置
+7. c++17风格
 
 ## 模型文件
 

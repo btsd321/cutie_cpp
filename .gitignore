@@ -63,3 +63,13 @@ share/model/.download_complete
 
 # Claude Code
 .claude/settings.local.json
+
+# Doxygen generated documentation
+share/docs/html/
+share/docs/latex/
+share/docs/man/
+share/docs/xml/
+docs/html/
+docs/latex/
+docs/man/
+docs/xml/
