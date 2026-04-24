@@ -111,7 +111,11 @@ if(ENABLE_ONNXRUNTIME)
 endif()
 
 if(ENABLE_TENSORRT)
-    find_package(CUDA REQUIRED)
+    # 展开 TENSORRT_ROOT 中的 ~ 符号
+    if(DEFINED TENSORRT_ROOT)
+        string(REGEX REPLACE "^~" "$ENV{HOME}" TENSORRT_ROOT "${TENSORRT_ROOT}")
+    endif()
+
     find_package(TensorRT REQUIRED)
 endif()
 

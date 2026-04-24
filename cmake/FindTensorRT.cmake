@@ -8,45 +8,93 @@
 #   TensorRT::nvinfer (imported target)
 #   TensorRT::nvonnxparser (imported target)
 
+# 展开 ~ 符号
+if(DEFINED ENV{TENSORRT_ROOT})
+    file(TO_CMAKE_PATH "$ENV{TENSORRT_ROOT}" _tensorrt_root_env)
+    string(REGEX REPLACE "^~" "$ENV{HOME}" _tensorrt_root_env "${_tensorrt_root_env}")
+else()
+    set(_tensorrt_root_env "")
+endif()
+
+if(DEFINED TENSORRT_ROOT)
+    file(TO_CMAKE_PATH "${TENSORRT_ROOT}" _tensorrt_root_var)
+    string(REGEX REPLACE "^~" "$ENV{HOME}" _tensorrt_root_var "${_tensorrt_root_var}")
+else()
+    set(_tensorrt_root_var "")
+endif()
+
 find_path(TensorRT_INCLUDE_DIR
     NAMES NvInfer.h
     PATH_SUFFIXES include
     PATHS
-        ${TENSORRT_ROOT}
-        $ENV{TENSORRT_ROOT}
+        ${_tensorrt_root_var}
+        ${_tensorrt_root_env}
         /usr/local
         /usr
+    NO_DEFAULT_PATH
 )
+
+# 如果上面没找到，使用默认搜索路径
+if(NOT TensorRT_INCLUDE_DIR)
+    find_path(TensorRT_INCLUDE_DIR
+        NAMES NvInfer.h
+        PATH_SUFFIXES include
+    )
+endif()
 
 find_library(TensorRT_nvinfer_LIBRARY
     NAMES nvinfer
     PATH_SUFFIXES lib lib64
     PATHS
-        ${TENSORRT_ROOT}
-        $ENV{TENSORRT_ROOT}
+        ${_tensorrt_root_var}
+        ${_tensorrt_root_env}
         /usr/local
         /usr
+    NO_DEFAULT_PATH
 )
+
+if(NOT TensorRT_nvinfer_LIBRARY)
+    find_library(TensorRT_nvinfer_LIBRARY
+        NAMES nvinfer
+        PATH_SUFFIXES lib lib64
+    )
+endif()
 
 find_library(TensorRT_nvonnxparser_LIBRARY
     NAMES nvonnxparser
     PATH_SUFFIXES lib lib64
     PATHS
-        ${TENSORRT_ROOT}
-        $ENV{TENSORRT_ROOT}
+        ${_tensorrt_root_var}
+        ${_tensorrt_root_env}
         /usr/local
         /usr
+    NO_DEFAULT_PATH
 )
+
+if(NOT TensorRT_nvonnxparser_LIBRARY)
+    find_library(TensorRT_nvonnxparser_LIBRARY
+        NAMES nvonnxparser
+        PATH_SUFFIXES lib lib64
+    )
+endif()
 
 find_library(TensorRT_nvinfer_plugin_LIBRARY
     NAMES nvinfer_plugin
     PATH_SUFFIXES lib lib64
     PATHS
-        ${TENSORRT_ROOT}
-        $ENV{TENSORRT_ROOT}
+        ${_tensorrt_root_var}
+        ${_tensorrt_root_env}
         /usr/local
         /usr
+    NO_DEFAULT_PATH
 )
+
+if(NOT TensorRT_nvinfer_plugin_LIBRARY)
+    find_library(TensorRT_nvinfer_plugin_LIBRARY
+        NAMES nvinfer_plugin
+        PATH_SUFFIXES lib lib64
+    )
+endif()
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(TensorRT
