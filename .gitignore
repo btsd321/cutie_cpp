@@ -60,6 +60,7 @@ vcpkg/
 .venv/
 
 share/model/.download_complete
+share/model/.trt_export_complete
 
 # Claude Code
 .claude/settings.local.json

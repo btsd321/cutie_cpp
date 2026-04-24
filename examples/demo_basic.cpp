@@ -41,25 +41,33 @@
 // CMake embeds CUTIE_BUILD_MODEL_DIR and CUTIE_INSTALL_MODEL_DIR at compile
 // time via target_compile_definitions.
 // ---------------------------------------------------------------------------
-static std::string find_default_onnx_dir() {
-    // Sentinel file that must be present for a valid model directory
-    const std::string sentinel = "pixel_encoder.onnx";
 
+// 检查目录中是否有匹配 *_pixel_encoder.onnx 的文件（支持任意模型前缀）
+static bool dir_has_onnx_models(const std::filesystem::path& dir) {
+    if (!std::filesystem::exists(dir)) return false;
+    const std::string suffix = "_pixel_encoder.onnx";
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        const std::string fname = entry.path().filename().string();
+        if (fname.size() > suffix.size() &&
+            fname.compare(fname.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static std::string find_default_onnx_dir() {
 #ifdef CUTIE_BUILD_MODEL_DIR
     {
         std::filesystem::path p(CUTIE_BUILD_MODEL_DIR);
-        if (std::filesystem::exists(p / sentinel)) {
-            return p.string();
-        }
+        if (dir_has_onnx_models(p)) return p.string();
     }
 #endif
 
 #ifdef CUTIE_INSTALL_MODEL_DIR
     {
         std::filesystem::path p(CUTIE_INSTALL_MODEL_DIR);
-        if (std::filesystem::exists(p / sentinel)) {
-            return p.string();
-        }
+        if (dir_has_onnx_models(p)) return p.string();
     }
 #endif
 

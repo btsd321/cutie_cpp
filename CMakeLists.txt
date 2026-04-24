@@ -24,6 +24,9 @@ option(ENABLE_ONNXRUNTIME "Build with ONNXRuntime backend" ON)
 option(ENABLE_TENSORRT    "Build with TensorRT backend"    OFF)
 option(BUILD_EXAMPLES     "Build example programs"          ON)
 option(DOWNLOAD_MODELS    "Download .pth model weights at build time" ON)
+option(EXPORT_ONNX        "Auto-export ONNX submodules at build time if missing" ON)
+set(PYTHON_EXECUTABLE     "" CACHE STRING "Python interpreter path (default: auto-detect)")
+set(NUM_OBJECTS           "2" CACHE STRING "Number of objects for TensorRT engine export")
 
 # === uninstall target ===
 configure_file(
@@ -38,6 +41,19 @@ add_custom_target(uninstall
 
 # === CMake 模块路径 ===
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# === Python 解释器查找 ===
+if(PYTHON_EXECUTABLE)
+    set(_python_exe "${PYTHON_EXECUTABLE}")
+else()
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_FOUND)
+        set(_python_exe "${Python3_EXECUTABLE}")
+    else()
+        set(_python_exe "python3")
+    endif()
+endif()
+message(STATUS "Python interpreter: ${_python_exe}")
 
 # === 必需依赖 ===
 find_package(OpenCV REQUIRED)
@@ -181,9 +197,9 @@ if(ENABLE_TENSORRT)
 endif()
 
 # === 模型下载 custom target ===
-# 使用 stamp 文件避免每次 build 都重复调用脚本
 set(CUTIE_MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/share/model")
 set(CUTIE_MODEL_STAMP      "${CUTIE_MODEL_SOURCE_DIR}/.download_complete")
+set(CUTIE_MODEL_PREFIX     "cutie-base-mega")
 
 if(DOWNLOAD_MODELS)
     add_custom_command(
@@ -193,14 +209,60 @@ if(DOWNLOAD_MODELS)
         COMMENT "Checking / downloading missing Cutie .pth models to share/model/..."
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
-    add_custom_target(download_models
-        DEPENDS "${CUTIE_MODEL_STAMP}"
-    )
+    add_custom_target(download_models DEPENDS "${CUTIE_MODEL_STAMP}")
     add_dependencies(cutie download_models)
 else()
     add_custom_target(download_models
         COMMENT "Model download skipped (DOWNLOAD_MODELS=OFF)"
     )
+endif()
+
+# === ONNX 导出 custom target ===
+set(CUTIE_ONNX_STAMP       "${CUTIE_MODEL_SOURCE_DIR}/.onnx_export_complete")
+set(CUTIE_EXPORT_ONNX_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/share/scripts/export_onnx.py")
+
+if(EXPORT_ONNX)
+    add_custom_command(
+        OUTPUT  "${CUTIE_ONNX_STAMP}"
+        COMMAND ${CMAKE_COMMAND}
+            -DMODEL_DIR="${CUTIE_MODEL_SOURCE_DIR}"
+            -DMODEL_PREFIX="${CUTIE_MODEL_PREFIX}"
+            -DPYTHON_EXE="${_python_exe}"
+            -DEXPORT_SCRIPT="${CUTIE_EXPORT_ONNX_SCRIPT}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/export_onnx_if_needed.cmake"
+        COMMAND ${CMAKE_COMMAND} -E touch "${CUTIE_ONNX_STAMP}"
+        DEPENDS download_models
+        COMMENT "Checking / exporting ONNX submodules..."
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    add_custom_target(export_onnx DEPENDS "${CUTIE_ONNX_STAMP}")
+    add_dependencies(cutie export_onnx)
+else()
+    add_custom_target(export_onnx
+        COMMENT "ONNX export skipped (EXPORT_ONNX=OFF)"
+    )
+endif()
+
+# === TensorRT 导出 custom target ===
+if(ENABLE_TENSORRT)
+    set(CUTIE_TRT_STAMP         "${CUTIE_MODEL_SOURCE_DIR}/.trt_export_complete")
+    set(CUTIE_EXPORT_TRT_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/share/scripts/export_tensorrt.py")
+    add_custom_command(
+        OUTPUT  "${CUTIE_TRT_STAMP}"
+        COMMAND ${CMAKE_COMMAND}
+            -DMODEL_DIR="${CUTIE_MODEL_SOURCE_DIR}"
+            -DMODEL_PREFIX="${CUTIE_MODEL_PREFIX}"
+            -DNUM_OBJECTS="${NUM_OBJECTS}"
+            -DPYTHON_EXE="${_python_exe}"
+            -DEXPORT_SCRIPT="${CUTIE_EXPORT_TRT_SCRIPT}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/export_trt_if_needed.cmake"
+        COMMAND ${CMAKE_COMMAND} -E touch "${CUTIE_TRT_STAMP}"
+        DEPENDS export_onnx
+        COMMENT "Checking / exporting TensorRT engines..."
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    add_custom_target(export_tensorrt DEPENDS "${CUTIE_TRT_STAMP}")
+    add_dependencies(cutie export_tensorrt)
 endif()
 
 # === 示例 ===
@@ -211,7 +273,7 @@ if(BUILD_EXAMPLES)
     # 编译期嵌入两个候选模型目录，供 demo 运行时自动探测
     target_compile_definitions(demo_basic PRIVATE
         CUTIE_BUILD_MODEL_DIR="${CUTIE_MODEL_SOURCE_DIR}"
-        CUTIE_INSTALL_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/cutie/model"
+        CUTIE_INSTALL_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/cutie_cpp/model"
     )
 endif()
 
@@ -261,12 +323,13 @@ install(FILES
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/cutie"
 )
 
-# === 模型文件安装（.pth 权重 + 任意已导出的 .onnx 子模块）===
+# === 模型文件安装（.pth 权重 + 任意已导出的 .onnx/.engine 文件）===
 # OPTIONAL: 若 share/model/ 为空或不存在也不报错
 install(DIRECTORY "${CUTIE_MODEL_SOURCE_DIR}/"
-    DESTINATION "share/cutie/model"
+    DESTINATION "share/cutie_cpp/model"
     OPTIONAL
     FILES_MATCHING
         PATTERN "*.pth"
         PATTERN "*.onnx"
+        PATTERN "*.engine"
 )
