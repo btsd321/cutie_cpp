@@ -11,13 +11,19 @@ VCPKG_ROOT="/home/lixinlong/Project/linden_perception/thirdparty/vcpkg"  # if se
 CUDA_ROOT="/usr/local/cuda-12.9"
 OPENCV_DIR="${VCPKG_ROOT}/installed/x64-linux"
 ONNXRUNTIME_ROOT="${VCPKG_ROOT}/installed/x64-linux"
-TENSORRT_ROOT="~/Library/tensorrt/TensorRT-10.13.3.9"
+TENSORRT_ROOT="/home/lixinlong/Project/linden_perception/thirdparty/tensorrt/TensorRT-10.13.3.9"
 INSTALL_PREFIX="${SCRIPT_DIR}/install"
 
 # Backend toggles
 ENABLE_ONNXRUNTIME="ON"
 ENABLE_TENSORRT="OFF"
 BUILD_EXAMPLES="ON"
+
+# Model options
+DOWNLOAD_MODELS="ON"
+EXPORT_ONNX="OFF"
+PYTHON_EXECUTABLE=""
+NUM_OBJECTS="2"
 
 usage() {
     cat <<EOF
@@ -43,6 +49,14 @@ Build options:
   --debug                  Shorthand for --build-type Debug
   --clean                  Remove build dir first
   -h, --help               Show this message
+
+Model options:
+  --python PATH            Python interpreter path   (default: auto-detect)
+  --num-objects N          Number of objects for TRT export (default: 2)
+  --download-models        Download .pth weights at build time (default: ON)
+  --no-download-models     Skip .pth weight download
+  --export-onnx            Auto-export ONNX submodules at build time (default: OFF)
+  --no-export-onnx         Skip ONNX export (default)
 EOF
     exit 0
 }
@@ -61,6 +75,12 @@ while [[ $# -gt 0 ]]; do
         --enable-tensorrt)   ENABLE_TENSORRT="ON";   shift   ;;
         --disable-onnxruntime) ENABLE_ONNXRUNTIME="OFF"; shift ;;
         --disable-examples)  BUILD_EXAMPLES="OFF";   shift   ;;
+        --python)            PYTHON_EXECUTABLE="$2"; shift 2 ;;
+        --num-objects)       NUM_OBJECTS="$2";       shift 2 ;;
+        --download-models)   DOWNLOAD_MODELS="ON";   shift   ;;
+        --no-download-models) DOWNLOAD_MODELS="OFF"; shift   ;;
+        --export-onnx)       EXPORT_ONNX="ON";       shift   ;;
+        --no-export-onnx)    EXPORT_ONNX="OFF";      shift   ;;
         --debug)             BUILD_TYPE="Debug";       shift   ;;
         --clean)
             echo "Cleaning build directory: ${BUILD_DIR}"
@@ -78,7 +98,11 @@ CMAKE_ARGS=(
     -DENABLE_ONNXRUNTIME="${ENABLE_ONNXRUNTIME}"
     -DENABLE_TENSORRT="${ENABLE_TENSORRT}"
     -DBUILD_EXAMPLES="${BUILD_EXAMPLES}"
+    -DDOWNLOAD_MODELS="${DOWNLOAD_MODELS}"
+    -DEXPORT_ONNX="${EXPORT_ONNX}"
+    -DNUM_OBJECTS="${NUM_OBJECTS}"
 )
+[[ -n "${PYTHON_EXECUTABLE}" ]] && CMAKE_ARGS+=(-DPYTHON_EXECUTABLE="${PYTHON_EXECUTABLE}")
 
 if [[ -n "${VCPKG_ROOT}" ]]; then
     VCPKG_TOOLCHAIN="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
@@ -116,6 +140,10 @@ echo "  Install:     ${INSTALL_PREFIX}"
 echo "  ORT:         ${ENABLE_ONNXRUNTIME}"
 echo "  TRT:         ${ENABLE_TENSORRT}"
 echo "  Examples:    ${BUILD_EXAMPLES}"
+echo "  DlModels:    ${DOWNLOAD_MODELS}"
+echo "  ExportONNX:  ${EXPORT_ONNX}"
+echo "  NumObjects:  ${NUM_OBJECTS}"
+[[ -n "${PYTHON_EXECUTABLE}" ]] && echo "  Python:      ${PYTHON_EXECUTABLE}"
 echo "  Jobs:        ${JOBS}"
 [[ -n "${VCPKG_ROOT}" ]]       && echo "  vcpkg:       ${VCPKG_ROOT}"
 [[ -n "${CUDA_ROOT}" ]]        && echo "  CUDA:        ${CUDA_ROOT}"
