@@ -1,5 +1,11 @@
-#ifndef CUTIE_ORT_CORE_GPU_POSTPROCESS_H
-#define CUTIE_ORT_CORE_GPU_POSTPROCESS_H
+/**
+ * @file gpu_postprocess.h
+ * @brief GPU 后处理：unpad + argmax index mask 生成。
+ *
+ *  消除 InferenceCore 中的 D2H + CPU unpad/resize/argmax 瓶颈。
+ */
+
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -10,10 +16,6 @@
 
 #include "cutie/common/gpu_memory.h"
 #include "cutie/types.h"
-
-/// @file gpu_postprocess.h
-/// GPU 后处理：unpad + argmax index mask 生成。
-/// 消除 InferenceCore 中的 D2H + CPU unpad/resize/argmax 瓶颈。
 
 namespace cutie
 {
@@ -71,5 +73,3 @@ cv::cuda::GpuMat gpu_prob_to_index_mask(GpuMemoryAllocator& alloc,
 
 }  // namespace ortcore
 }  // namespace cutie
-
-#endif  // CUTIE_ORT_CORE_GPU_POSTPROCESS_H

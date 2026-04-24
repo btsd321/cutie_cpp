@@ -1,5 +1,4 @@
-#ifndef CUTIE_ORT_TYPES_H
-#define CUTIE_ORT_TYPES_H
+#pragma once
 
 #include <string>
 #include <vector>
@@ -22,4 +21,3 @@ struct OrtSessionInfo
 }  // namespace ortcore
 }  // namespace cutie
 
-#endif  // CUTIE_ORT_TYPES_H

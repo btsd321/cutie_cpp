@@ -1,5 +1,4 @@
-#ifndef CUTIE_CORE_IMAGE_FEATURE_STORE_H
-#define CUTIE_CORE_IMAGE_FEATURE_STORE_H
+#pragma once
 
 #include <unordered_map>
 
@@ -87,5 +86,3 @@ private:
 
 }  // namespace core
 }  // namespace cutie
-
-#endif  // CUTIE_CORE_IMAGE_FEATURE_STORE_H

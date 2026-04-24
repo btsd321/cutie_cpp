@@ -1,13 +1,3 @@
-#ifndef CUTIE_ORT_CORE_GPU_TENSOR_OPS_H
-#define CUTIE_ORT_CORE_GPU_TENSOR_OPS_H
-
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
-#include "cutie/common/gpu_memory.h"
-#include "cutie/types.h"
-
 /**
  * @file gpu_tensor_ops.h
  * @brief High-level GPU tensor operation primitives.
@@ -20,8 +10,7 @@
  * 所有输入输出均为 GPU Ort::Value。
  */
 
-#ifndef CUTIE_ORT_CORE_GPU_TENSOR_OPS_H
-#define CUTIE_ORT_CORE_GPU_TENSOR_OPS_H
+#pragma once
 
 #include <unordered_map>
 #include <utility>
@@ -190,5 +179,3 @@ inline int64_t dim_size(const Ort::Value& t, int axis)
 
 }  // namespace ortcore
 }  // namespace cutie
-
-#endif  // CUTIE_COMMON_GPU_TENSOR_OPS_H

@@ -1,5 +1,4 @@
-#ifndef CUTIE_ORT_UTILS_H
-#define CUTIE_ORT_UTILS_H
+#pragma once
 
 #include <vector>
 
@@ -53,5 +52,3 @@ Ort::Value slice_tensor_dim(const Ort::Value& src, int axis, int64_t actual_size
 
 }  // namespace ortcore
 }  // namespace cutie
-
-#endif  // CUTIE_ORT_UTILS_H

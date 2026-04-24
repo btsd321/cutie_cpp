@@ -1,5 +1,4 @@
-#ifndef CUTIE_ORT_CORE_GPU_IMAGE_PREPROCESS_H
-#define CUTIE_ORT_CORE_GPU_IMAGE_PREPROCESS_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -103,4 +102,3 @@ private:
 }  // namespace ortcore
 }  // namespace cutie
 
-#endif  // CUTIE_ORT_CORE_GPU_IMAGE_PREPROCESS_H

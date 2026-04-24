@@ -8,8 +8,7 @@
  * consolidation for long-term memory.
  */
 
-#ifndef CUTIE_CORE_KV_MEMORY_STORE_H
-#define CUTIE_CORE_KV_MEMORY_STORE_H
+#pragma once
 
 #include <map>
 #include <string>
@@ -288,5 +287,3 @@ private:
 
 }  // namespace core
 }  // namespace cutie
-
-#endif  // CUTIE_CORE_KV_MEMORY_STORE_H

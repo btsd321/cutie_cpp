@@ -7,8 +7,7 @@
  * memory scheduling, feature caching).
  */
 
-#ifndef CUTIE_CORE_INFERENCE_CORE_H
-#define CUTIE_CORE_INFERENCE_CORE_H
+#pragma once
 
 #include <memory>
 #include <vector>
@@ -179,5 +178,3 @@ private:
 
 }  // namespace core
 }  // namespace cutie
-
-#endif  // CUTIE_CORE_INFERENCE_CORE_H

@@ -7,8 +7,7 @@
  * Uses IO Binding for zero-copy GPU inference.
  */
 
-#ifndef CUTIE_ORT_CV_ORT_CUTIE_H
-#define CUTIE_ORT_CV_ORT_CUTIE_H
+#pragma once
 
 #include <memory>
 #include <string>
@@ -281,5 +280,3 @@ private:
 
 }  // namespace ortcv
 }  // namespace cutie
-
-#endif  // CUTIE_ORT_CV_ORT_CUTIE_H

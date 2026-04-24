@@ -6,8 +6,7 @@
  * automatic model loading, input/output handling, and inference execution.
  */
 
-#ifndef CUTIE_ORT_HANDLER_H
-#define CUTIE_ORT_HANDLER_H
+#pragma once
 
 #include <memory>
 #include <string>
@@ -106,5 +105,3 @@ private:
 
 }  // namespace ortcore
 }  // namespace cutie
-
-#endif  // CUTIE_ORT_HANDLER_H

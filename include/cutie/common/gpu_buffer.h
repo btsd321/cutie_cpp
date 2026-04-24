@@ -1,5 +1,4 @@
-#ifndef CUTIE_ORT_CORE_GPU_BUFFER_H
-#define CUTIE_ORT_CORE_GPU_BUFFER_H
+#pragma once
 
 #include <cuda_runtime.h>
 #include <cstddef>
@@ -55,5 +54,3 @@ private:
 
 }  // namespace ortcore
 }  // namespace cutie
-
-#endif  // CUTIE_ORT_CORE_GPU_BUFFER_H

@@ -1,5 +1,4 @@
-#ifndef CUTIE_CORE_PROCESSOR_H
-#define CUTIE_CORE_PROCESSOR_H
+#pragma once
 
 #include <memory>
 #include <string>
@@ -457,5 +456,3 @@ private:
 
 }  // namespace core
 }  // namespace cutie
-
-#endif  // CUTIE_CORE_PROCESSOR_H

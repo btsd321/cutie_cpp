@@ -1,5 +1,4 @@
-#ifndef CUTIE_CORE_MEMORY_UTILS_H
-#define CUTIE_CORE_MEMORY_UTILS_H
+#pragma once
 
 #include <utility>
 #include <vector>
@@ -55,5 +54,3 @@ cv::Mat unpad(const cv::Mat& img, const std::array<int, 4>& pad);
 
 }  // namespace core
 }  // namespace cutie
-
-#endif  // CUTIE_CORE_MEMORY_UTILS_H

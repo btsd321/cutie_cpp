@@ -1,5 +1,4 @@
-#ifndef CUTIE_ORT_CORE_GPU_MEMORY_H
-#define CUTIE_ORT_CORE_GPU_MEMORY_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -294,4 +293,3 @@ private:
 }  // namespace ortcore
 }  // namespace cutie
 
-#endif  // CUTIE_ORT_CORE_GPU_MEMORY_H

@@ -7,8 +7,7 @@
  * All tensors are GPU-resident (Ort::Value).
  */
 
-#ifndef CUTIE_CORE_MEMORY_MANAGER_H
-#define CUTIE_CORE_MEMORY_MANAGER_H
+#pragma once
 
 #include <functional>
 #include <memory>
@@ -311,5 +310,3 @@ private:
 
 }  // namespace core
 }  // namespace cutie
-
-#endif  // CUTIE_CORE_MEMORY_MANAGER_H

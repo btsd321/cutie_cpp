@@ -7,8 +7,7 @@
  * mask conversion and per-object tensor stacking.
  */
 
-#ifndef CUTIE_CORE_OBJECT_MANAGER_H
-#define CUTIE_CORE_OBJECT_MANAGER_H
+#pragma once
 
 #include <cstdint>
 #include <map>
@@ -177,5 +176,3 @@ private:
 
 }  // namespace core
 }  // namespace cutie
-
-#endif  // CUTIE_CORE_OBJECT_MANAGER_H

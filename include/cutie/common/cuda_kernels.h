@@ -1,5 +1,4 @@
-#ifndef CUTIE_ORT_CORE_CUDA_KERNELS_H
-#define CUTIE_ORT_CORE_CUDA_KERNELS_H
+#pragma once
 
 #include <cstdint>
 
@@ -82,4 +81,3 @@ void bilinear_resize(const float* src, int src_h, int src_w, float* dst, int dst
 }  // namespace cuda
 }  // namespace cutie
 
-#endif  // CUTIE_ORT_CORE_CUDA_KERNELS_H
