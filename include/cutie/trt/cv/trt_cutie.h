@@ -6,8 +6,7 @@
  * 管理完整的 Cutie 推理流程，支持全 GPU 数据流。
  */
 
-#ifndef CUTIE_TRT_CV_TRT_CUTIE_H
-#define CUTIE_TRT_CV_TRT_CUTIE_H
+#pragma once
 
 #include <memory>
 #include <string>
@@ -16,7 +15,7 @@
 
 #include <linden_logger/logger_interface.hpp>
 
-#include "cutie/ort/core/gpu_memory.h"
+#include "cutie/common/gpu_memory.h"
 #include "cutie/ort/core/ort_config.h"
 #include "cutie/trt/core/trt_handler.h"
 
@@ -254,5 +253,3 @@ private:
 
 }  // namespace trtcv
 }  // namespace cutie
-
-#endif  // CUTIE_TRT_CV_TRT_CUTIE_H

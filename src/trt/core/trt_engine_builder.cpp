@@ -151,31 +151,17 @@ TrtUniquePtr<nvinfer1::ICudaEngine> TrtEngineBuilder::build_from_onnx(
     logger_->debug("TrtEngineBuilder: 工作空间大小 = {} MB",
                    config.max_workspace_size / (1024 * 1024));
 
-    // 启用 FP16 精度（TensorRT 10.x 使用新 API）
+    // 启用 FP16 精度（TensorRT 10.x API）
     if (config.enable_fp16)
     {
-        builder_config->setFlag(nvinfer1::BuilderFlag::kPREFER_PRECISION_CONSTRAINTS);
-        builder_config->setFlag(nvinfer1::BuilderFlag::kOBEY_PRECISION_CONSTRAINTS);
-        // 设置默认精度为 FP16
-        for (int i = 0; i < network->getNbLayers(); ++i)
-        {
-            auto layer = network->getLayer(i);
-            layer->setPrecision(nvinfer1::DataType::kHALF);
-        }
+        builder_config->setFlag(nvinfer1::BuilderFlag::kFP16);
         logger_->info("TrtEngineBuilder: 启用 FP16 精度");
     }
 
-    // 启用 INT8 精度（TensorRT 10.x 使用新 API）
+    // 启用 INT8 精度（TensorRT 10.x API）
     if (config.enable_int8)
     {
-        builder_config->setFlag(nvinfer1::BuilderFlag::kPREFER_PRECISION_CONSTRAINTS);
-        builder_config->setFlag(nvinfer1::BuilderFlag::kOBEY_PRECISION_CONSTRAINTS);
-        // 设置默认精度为 INT8
-        for (int i = 0; i < network->getNbLayers(); ++i)
-        {
-            auto layer = network->getLayer(i);
-            layer->setPrecision(nvinfer1::DataType::kINT8);
-        }
+        builder_config->setFlag(nvinfer1::BuilderFlag::kINT8);
         logger_->info("TrtEngineBuilder: 启用 INT8 精度");
     }
 
