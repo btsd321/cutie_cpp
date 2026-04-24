@@ -28,6 +28,7 @@ namespace ortcore
 
 // ── 构造 / 析构 ────────────────────────────────────────────────────
 // 初始化 GPU 内存分配器，设置 CUDA 设备和内存信息。
+GpuMemoryAllocator::GpuMemoryAllocator(int device_id)
     : device_id_(device_id),
       gpu_memory_info_(
           Ort::MemoryInfo("Cuda", OrtAllocatorType::OrtDeviceAllocator, device_id, OrtMemTypeDefault))

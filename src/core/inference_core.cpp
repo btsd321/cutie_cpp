@@ -48,6 +48,7 @@ using GA = ortcore::GpuMemoryAllocator;
 
 // ── Impl ────────────────────────────────────────────────────────────
 // InferenceCore 的内部实现结构，管理推理状态和内存。
+struct InferenceCore::Impl
 {
     CutieConfig cfg;
     std::shared_ptr<linden::log::ILogger> logger;

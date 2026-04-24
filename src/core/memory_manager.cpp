@@ -29,6 +29,8 @@ using GA = ortcore::GpuMemoryAllocator;
 
 // ── 构造 / 配置 ────────────────────────────────────────────────────
 // 初始化三层内存系统，配置参数来自 CutieConfig。
+MemoryManager::MemoryManager(const CutieConfig& cfg, ObjectManager* object_manager,
+                             ortcore::GpuMemoryAllocator* alloc)
     : alloc_(alloc),
       object_manager_(object_manager),
       sensory_dim_(cfg.model.sensory_dim),

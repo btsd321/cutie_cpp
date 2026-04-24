@@ -26,6 +26,8 @@ using GA = GpuMemoryAllocator;
 
 // ── gpu_get_similarity ──────────────────────────────────────────────
 // 计算各向异性 L2 相似度，用于内存查询中的特征匹配。
+Ort::Value gpu_get_similarity(GA& alloc, const Ort::Value& mk, const Ort::Value& ms,
+                               const Ort::Value& qk, const Ort::Value& qe)
 {
     auto mk_shape = GA::shape(mk);
     auto qk_shape = GA::shape(qk);
