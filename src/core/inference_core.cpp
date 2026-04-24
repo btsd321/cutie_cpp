@@ -1,3 +1,12 @@
+/**
+ * @file inference_core.cpp
+ * @brief InferenceCore implementation (main inference pipeline).
+ *
+ * Implements the core inference loop that orchestrates the complete Cutie
+ * pipeline: image encoding, memory read, segmentation, and memory write.
+ * Manages frame-level state and memory scheduling.
+ */
+
 #include <linden_logger/logger_interface.hpp>
 
 #include "cutie/core/image_feature_store.h"
@@ -34,8 +43,7 @@ namespace core
 using GA = ortcore::GpuMemoryAllocator;
 
 // ── Impl ────────────────────────────────────────────────────────────
-
-struct InferenceCore::Impl
+// InferenceCore 的内部实现结构，管理推理状态和内存。
 {
     CutieConfig cfg;
     std::shared_ptr<linden::log::ILogger> logger;

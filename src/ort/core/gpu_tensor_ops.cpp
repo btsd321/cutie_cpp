@@ -1,3 +1,12 @@
+/**
+ * @file gpu_tensor_ops.cpp
+ * @brief GPU tensor operation implementations.
+ *
+ * Implements high-level GPU tensor operations for memory management and inference,
+ * including similarity computation, softmax, readout, aggregation, and stacking.
+ * All operations use CUDA kernels and cuBLAS for efficient GPU computation.
+ */
+
 #include "cutie/ort/core/gpu_tensor_ops.h"
 #include "cutie/ort/core/cuda_kernels.h"
 
@@ -16,9 +25,7 @@ namespace ortcore
 using GA = GpuMemoryAllocator;
 
 // ── gpu_get_similarity ──────────────────────────────────────────────
-
-Ort::Value gpu_get_similarity(GA& alloc, const Ort::Value& mk, const Ort::Value& ms,
-                              const Ort::Value& qk, const Ort::Value& qe)
+// 计算各向异性 L2 相似度，用于内存查询中的特征匹配。
 {
     auto mk_shape = GA::shape(mk);
     auto qk_shape = GA::shape(qk);

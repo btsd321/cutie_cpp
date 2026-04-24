@@ -1,3 +1,11 @@
+/**
+ * @file processor.cpp
+ * @brief CutieProcessor implementation (public API entry point).
+ *
+ * Implements the main processor class that manages video object segmentation
+ * inference. Provides both CPU and GPU inference paths with memory management.
+ */
+
 #include <cstring>
 #include <stdexcept>
 
@@ -12,6 +20,7 @@ namespace cutie
 {
 
 // ── GpuCutieMask::download ──────────────────────────────────────────
+// GPU 结果下载到 CPU，用于后续处理或保存。
 
 types::CutieMask types::GpuCutieMask::download() const
 {

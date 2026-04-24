@@ -1,3 +1,12 @@
+/**
+ * @file ort_cutie.cpp
+ * @brief OrtCutie implementation (ONNX Runtime model wrapper).
+ *
+ * Implements the wrapper for 6 ONNX Runtime sessions managing the complete
+ * Cutie inference pipeline. Uses IO Binding for zero-copy GPU inference.
+ * Includes ONNX Runtime logging integration and session management.
+ */
+
 #include <filesystem>
 #include <stdexcept>
 
@@ -10,6 +19,7 @@ namespace ortcv
 {
 
 // ── ONNX Runtime 日志回调 ────────────────────────────────────────
+// 将 ONNX Runtime 的日志输出集成到 linden_logger 系统。
 
 static void ORT_API_CALL ort_logging_callback(void* param, OrtLoggingLevel severity,
                                                const char* category, const char* logid,

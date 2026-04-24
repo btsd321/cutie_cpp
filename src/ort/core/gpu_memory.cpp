@@ -1,3 +1,12 @@
+/**
+ * @file gpu_memory.cpp
+ * @brief GpuMemoryAllocator implementation.
+ *
+ * Implements GPU memory allocation, CPU↔GPU data transfer, and tensor operations.
+ * Provides zero-copy conversions between Ort::Value and cv::cuda::GpuMat.
+ * Includes image preprocessing and tensor manipulation on GPU.
+ */
+
 #include "cutie/ort/core/gpu_memory.h"
 #include "cutie/ort/core/cuda_kernels.h"
 
@@ -18,8 +27,7 @@ namespace ortcore
 {
 
 // ── 构造 / 析构 ────────────────────────────────────────────────────
-
-GpuMemoryAllocator::GpuMemoryAllocator(int device_id)
+// 初始化 GPU 内存分配器，设置 CUDA 设备和内存信息。
     : device_id_(device_id),
       gpu_memory_info_(
           Ort::MemoryInfo("Cuda", OrtAllocatorType::OrtDeviceAllocator, device_id, OrtMemTypeDefault))

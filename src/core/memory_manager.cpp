@@ -1,3 +1,12 @@
+/**
+ * @file memory_manager.cpp
+ * @brief MemoryManager implementation (three-tier memory system).
+ *
+ * Implements memory management for working memory (recent frames),
+ * long-term memory (compressed prototypes), and sensory memory (per-object GRU state).
+ * Coordinates memory read/write operations across all three tiers.
+ */
+
 #include <algorithm>
 #include <cstring>
 #include <set>
@@ -19,9 +28,7 @@ namespace core
 using GA = ortcore::GpuMemoryAllocator;
 
 // ── 构造 / 配置 ────────────────────────────────────────────────────
-
-MemoryManager::MemoryManager(const CutieConfig& cfg, ObjectManager* object_manager,
-                             ortcore::GpuMemoryAllocator* alloc)
+// 初始化三层内存系统，配置参数来自 CutieConfig。
     : alloc_(alloc),
       object_manager_(object_manager),
       sensory_dim_(cfg.model.sensory_dim),
