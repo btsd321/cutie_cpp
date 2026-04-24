@@ -25,6 +25,10 @@
 #include "cutie/ort/cv/ort_cutie.h"
 #endif
 
+#ifdef ENABLE_TENSORRT
+#include "cutie/trt/cv/trt_cutie.h"
+#endif
+
 #include <cuda_runtime.h>
 
 #include <cmath>
@@ -66,6 +70,8 @@ using GA = ortcore::GpuMemoryAllocator;
 
 #ifdef ENABLE_ONNXRUNTIME
     std::unique_ptr<ortcv::OrtCutie> network;
+#elif defined(ENABLE_TENSORRT)
+    std::unique_ptr<trtcv::TrtCutie> network;
 #endif
 
     explicit Impl(const CutieConfig& config, std::shared_ptr<linden::log::ILogger> logger_ptr);
@@ -120,9 +126,20 @@ InferenceCore::Impl::Impl(const CutieConfig& config,
     if (model_h_ > 0 && model_w_ > 0)
         logger->info("InferenceCore: model input size {}x{} (auto-resize enabled)", model_h_,
                      model_w_);
-    logger->info("InferenceCore: GPU inference initialized (model_dir={})", cfg.model_dir);
+    logger->info("InferenceCore: GPU inference initialized with ONNX Runtime (model_dir={})", cfg.model_dir);
+#elif defined(ENABLE_TENSORRT)
+    network = std::make_unique<trtcv::TrtCutie>(cfg, logger);
+    model_h_ = network->model_input_h();
+    model_w_ = network->model_input_w();
+
+    memory = std::make_unique<MemoryManager>(cfg, &object_manager, &network->gpu_alloc());
+
+    if (model_h_ > 0 && model_w_ > 0)
+        logger->info("InferenceCore: model input size {}x{} (auto-resize enabled)", model_h_,
+                     model_w_);
+    logger->info("InferenceCore: GPU inference initialized with TensorRT (model_dir={})", cfg.model_dir);
 #else
-    logger->error("InferenceCore: no backend enabled. Build with -DENABLE_ONNXRUNTIME=ON");
+    logger->error("InferenceCore: no backend enabled. Build with -DENABLE_ONNXRUNTIME=ON or -DENABLE_TENSORRT=ON");
     throw std::runtime_error("InferenceCore: no backend enabled.");
 #endif
 }
