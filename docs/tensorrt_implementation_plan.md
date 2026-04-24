@@ -24,31 +24,53 @@
 
 ## 2. 架构设计
 
-### 2.1 目录结构
-
-参考 `src/ort/` 的组织方式，创建对应的 TensorRT 后端：
+### 2.1 目录结构（已实现）
 
 ```
-src/trt/
-├── core/
-│   ├── trt_handler.cpp/h          # TensorRT 引擎管理（对应 ort_handler）
-│   ├── trt_engine_builder.cpp/h   # ONNX → TensorRT Engine 构建器
-│   ├── gpu_memory.cpp/h            # GPU 内存分配器（复用或适配 ort 版本）
-│   ├── gpu_tensor_ops.cpp/h        # GPU 张量操作（复用 ort 版本的 CUDA kernels）
-│   ├── cuda_kernels.cu/h           # CUDA kernels（复用 ort 版本）
-│   └── trt_utils.cpp/h             # TensorRT 工具函数
-├── cv/
-│   └── trt_cutie.cpp/h             # TensorRT Cutie 模型封装（对应 ort_cutie）
-└── CMakeLists.txt
-
-include/cutie/trt/
-├── core/
-│   ├── trt_handler.h
-│   ├── trt_engine_builder.h
-│   ├── trt_config.h                # TensorRT 配置和类型定义
-│   └── trt_types.h
-└── cv/
-    └── trt_cutie.h
+cutie-cpp/
+├── include/cutie/
+│   ├── common/                     # GPU 公共代码（ORT 和 TRT 共享）✅
+│   │   ├── cuda_kernels.h
+│   │   ├── gpu_memory.h
+│   │   ├── gpu_tensor_ops.h
+│   │   ├── gpu_image_preprocess.h
+│   │   ├── gpu_mask_preprocess.h
+│   │   ├── gpu_postprocess.h
+│   │   └── gpu_buffer.h
+│   ├── ort/                        # ONNX Runtime 后端
+│   │   ├── core/
+│   │   │   ├── ort_handler.h
+│   │   │   ├── ort_utils.h
+│   │   │   └── ort_config.h
+│   │   └── cv/ort_cutie.h
+│   └── trt/                        # TensorRT 后端 ✅
+│       ├── core/
+│       │   ├── trt_types.h         ✅
+│       │   ├── trt_config.h        ✅
+│       │   ├── trt_engine_builder.h ✅
+│       │   └── trt_handler.h       ✅
+│       └── cv/
+│           └── trt_cutie.h         ✅
+└── src/
+    ├── common/                     # GPU 公共实现 ✅
+    │   ├── cuda_kernels.cu
+    │   ├── gpu_memory.cpp
+    │   ├── gpu_tensor_ops.cpp
+    │   ├── gpu_image_preprocess.cu
+    │   ├── gpu_mask_preprocess.cu
+    │   ├── gpu_postprocess.cu
+    │   └── gpu_buffer.cpp
+    ├── ort/                        # ONNX Runtime 实现
+    │   ├── core/
+    │   │   ├── ort_handler.cpp
+    │   │   └── ort_utils.cpp
+    │   └── cv/ort_cutie.cpp
+    └── trt/                        # TensorRT 实现
+        ├── core/
+        │   ├── trt_engine_builder.cpp ✅
+        │   └── trt_handler.cpp        ✅
+        └── cv/
+            └── trt_cutie.cpp          ⏳ 待实现
 ```
 
 ### 2.2 核心类设计
@@ -198,47 +220,64 @@ public:
 
 ## 3. 实现步骤
 
-### 3.1 Phase 1：基础设施（1-2 天）
+### 3.1 Phase 1：基础设施（1-2 天）✅ 已完成
 
 **目标：** 搭建 TensorRT 后端的基础框架。
 
-**任务：**
-1. 创建目录结构 `src/trt/` 和 `include/cutie/trt/`
-2. 实现 `TrtEngineBuilder`：
+**已完成任务：**
+1. ✅ 创建目录结构 `src/trt/` 和 `include/cutie/trt/`
+2. ✅ 实现 `TrtEngineBuilder`：
    - ONNX 解析和引擎构建
    - 引擎序列化/反序列化
    - 日志集成（linden_logger）
-3. 实现 `TrtHandler`：
+   - 智能缓存机制（`get_or_build_engine`）
+3. ✅ 实现 `TrtHandler`：
    - 引擎加载和执行上下文管理
-   - 输入输出绑定
-   - 同步/异步推理接口
-4. CMake 配置：
-   - 添加 `ENABLE_TENSORRT` 选项
-   - 查找 TensorRT 库（`FindTensorRT.cmake`）
-   - 编译 TensorRT 后端源文件
+   - 输入输出绑定（`setTensorAddress`）
+   - 同步/异步推理接口（`infer` / `infer_async`）
+   - 动态形状支持（`set_input_shape`）
+4. ✅ CMake 配置：
+   - 更新 `FindTensorRT.cmake`（添加 nvonnxparser 支持）
+   - 更新 `CMakeLists.txt`（添加 TensorRT 源文件和链接配置）
+5. ✅ 代码重构：
+   - 将 GPU 公共代码移动到 `cutie/common` 目录
+   - CUDA kernels、GPU 内存管理、GPU 张量操作等可在 ORT 和 TRT 后端间复用
+
+**提交记录：**
+```
+commit 0aeba7e
+refactor: 将 GPU 公共代码移动到 cutie/common 目录
+35 files changed, 1865 insertions(+), 44 deletions(-)
+```
 
 **验证：**
-- 单元测试：加载单个 ONNX 模型，构建引擎，执行简单推理
+- ⏳ 待实现：单元测试（加载单个 ONNX 模型，构建引擎，执行简单推理）
 
-### 3.2 Phase 2：模型封装（2-3 天）
+### 3.2 Phase 2：模型封装（2-3 天）🔄 进行中
 
 **目标：** 实现 `TrtCutie` 类，封装 6 个子模块。
 
-**任务：**
+**当前状态：**
+- ✅ `TrtCutie` 头文件已完成（`include/cutie/trt/cv/trt_cutie.h`）
+- ⏳ 待实现：`src/trt/cv/trt_cutie.cpp`
+
+**待完成任务：**
 1. 实现 `TrtCutie` 构造函数：
    - 加载 6 个 ONNX 模型
-   - 构建或加载缓存的 TensorRT 引擎
-   - 初始化 GPU 内存分配器
+   - 使用 `TrtEngineBuilder::get_or_build_engine()` 构建或加载缓存的 TensorRT 引擎
+   - 初始化 GPU 内存分配器（复用 `ortcore::GpuMemoryAllocator`）
+   - 创建 CUDA stream
 2. 实现子模块推理接口：
-   - `encode_image()`
-   - `transform_key()`
-   - `encode_mask()`
-   - `pixel_fusion()`
-   - `readout_query()`
-   - `segment()`
+   - `encode_image()` - 图像编码
+   - `transform_key()` - 关键特征投影
+   - `encode_mask()` - 掩码编码
+   - `pixel_fusion()` - 像素融合
+   - `readout_query()` - 对象查询
+   - `segment()` - 分割解码
 3. GPU 内存管理适配：
-   - 实现 `Ort::Value` ↔ `void*` 转换
-   - 确保张量数据在 GPU 上流转
+   - 使用 `Ort::Value::GetTensorMutableData<float>()` 提取 GPU 指针
+   - 通过 `TrtHandler::infer_async()` 传递给 TensorRT
+   - 确保张量数据在 GPU 上流转（零拷贝）
 
 **验证：**
 - 单帧推理测试：输入单张图像和掩码，验证输出形状和数值正确性
