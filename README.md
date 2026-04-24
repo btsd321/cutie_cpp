@@ -88,7 +88,7 @@ image ──► pixel_encoder ──► f16, f8, f4, pix_feat
 | OpenCV | ≥ 4.0 | ✅ |
 | ONNX Runtime | ≥ 1.16 | ONNX 后端 |
 | CUDA Toolkit | ≥ 11.8 | GPU 推理 |
-| TensorRT | ≥ 8.6 | TRT 后端 |
+| TensorRT | ≥ 10.0 | TRT 后端 |
 
 ### 编译步骤
 

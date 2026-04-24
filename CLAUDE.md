@@ -94,7 +94,7 @@ Cutie 模型被拆分为 6 个 ONNX 子模块，每帧按顺序调用：
 - **ONNX Runtime（≥ 1.16）**：主推理后端
 - **CUDA Toolkit（≥ 11.8）**：GPU 加速
 - **cuBLAS**：CUDA 矩阵运算库（CUDA Toolkit 自带，用于 GPU 端张量计算）
-- **TensorRT（≥ 8.6）**：可选的高性能后端
+- **TensorRT（≥ 10.0）**：可选的高性能后端
 
 ## 编程规范
 1. 所有cpp、hpp文件开头要描述文件作用、注意事项(Doxygen风格没有可不写)
