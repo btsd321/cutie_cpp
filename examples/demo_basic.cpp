@@ -3,7 +3,7 @@
  * @brief Basic demo of Cutie-CPP video object segmentation.
  *
  * Usage:
- *   ./demo_basic --video FILE --mask FILE [--model-dir DIR] [--visualize] [--frame-skip N]
+ *   ./demo_basic --video FILE --mask FILE [--model-dir DIR] [--visualize] [--save-video] [--frame-skip N]
  *
  * Arguments:
  *   --video FILE     - Input video file
@@ -11,6 +11,7 @@
  *   --model-dir DIR  - Optional. Directory with 6 ONNX submodule files;
  *                      auto-detected from build/install paths if omitted.
  *   --visualize      - Optional. Show preview window in addition to saving frames.
+ *   --save-video     - Optional. Save output video with mask overlay (disabled by default).
  *   --frame-skip N   - Optional. Skip N frames between inferences
  *                      (0 = every frame, 1 = every 2nd, ...). Default 0.
  */
@@ -174,6 +175,10 @@ int main(int argc, char** argv) {
         .default_value(0)
         .scan<'i', int>()
         .help("Skip N frames between inferences (0 = process every frame, 1 = every 2nd, ...)");
+    program.add_argument("--save-video")
+        .default_value(false)
+        .implicit_value(true)
+        .help("Save output video with mask overlay (disabled by default)");
 
     try {
         program.parse_args(argc, argv);
@@ -182,7 +187,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const bool show_window = program.get<bool>("--visualize");
+    const bool show_window  = program.get<bool>("--visualize");
+    const bool save_video   = program.get<bool>("--save-video");
     const std::string video_path = program.get<std::string>("--video");
     const std::string mask_path  = program.get<std::string>("--mask");
     std::string model_dir        = program.get<std::string>("--model-dir");
@@ -307,10 +313,13 @@ int main(int argc, char** argv) {
     int processed_cnt = 0;    // number of frames actually inferred & saved
     bool user_quit = false;
 
-    // Output video writer (initialized on first frame)
+    // Output video writer (initialized on first frame if --save-video is set)
     ::cv::VideoWriter video_writer;
     const double out_fps = cap.get(::cv::CAP_PROP_FPS);
     const fs::path video_out_path = output_dir / "output_mask.mp4";
+    if (save_video) {
+        logger->info("Video output enabled: {}", video_out_path.string());
+    }
 
     while (cap.read(frame)) {
         // Some codecs return true with an empty frame at EOF — treat as end.
@@ -352,8 +361,8 @@ int main(int argc, char** argv) {
 
         ::cv::Mat vis = visualize(frame, result.index_mask);
 
-        // Lazy-init video writer using first frame's size
-        if (!video_writer.isOpened()) {
+        // Lazy-init video writer using first frame's size (only if --save-video is set)
+        if (save_video && !video_writer.isOpened()) {
             int fourcc = ::cv::VideoWriter::fourcc('m', 'p', '4', 'v');
             double fps = (out_fps > 0.0) ? out_fps : 25.0;
             video_writer.open(video_out_path.string(), fourcc, fps, vis.size());
@@ -368,7 +377,7 @@ int main(int argc, char** argv) {
         // Write frame to output video. When frame_skip > 0 we duplicate the
         // visualized frame N+1 times so the output video keeps the same
         // timeline as the source.
-        if (video_writer.isOpened()) {
+        if (save_video && video_writer.isOpened()) {
             const int repeat = (frame_idx == 0) ? 1 : (frame_skip + 1);
             for (int r = 0; r < repeat; ++r) {
                 video_writer.write(vis);

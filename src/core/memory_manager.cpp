@@ -1,7 +1,5 @@
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
-#include <numeric>
 #include <set>
 #include <stdexcept>
 
@@ -12,26 +10,6 @@
 #include "cutie/ort/core/cuda_kernels.h"
 
 #include <cuda_runtime.h>
-
-// DEBUG helper
-static void debug_tensor_stats(const char* name, const Ort::Value& v,
-                                cutie::ortcore::GpuMemoryAllocator& alloc)
-{
-    if (!v.IsTensor()) {
-        fprintf(stderr, "[DEBUG MM] %s: <not tensor>\n", name);
-        return;
-    }
-    auto shape = cutie::ortcore::GpuMemoryAllocator::shape(v);
-    cv::Mat cpu = alloc.download(v);
-    const float* p = cpu.ptr<float>();
-    int64_t n = cutie::ortcore::GpuMemoryAllocator::numel(shape);
-    float mn = *std::min_element(p, p + n);
-    float mx = *std::max_element(p, p + n);
-    float mean = std::accumulate(p, p + n, 0.0f) / n;
-    fprintf(stderr, "[DEBUG MM] %s shape=[", name);
-    for (size_t i = 0; i < shape.size(); ++i) fprintf(stderr, "%ld%s", (long)shape[i], i+1<shape.size()?",":"");
-    fprintf(stderr, "], range=[%.6f,%.6f], mean=%.6f\n", mn, mx, mean);
-}
 
 namespace cutie
 {
@@ -287,17 +265,8 @@ std::unordered_map<ObjectId, Ort::Value> MemoryManager::read(
         {
             auto& memory_key = work_mem_->key().at(bucket_id);
             auto& shrink = work_mem_->shrinkage().at(bucket_id);
-
-            // DEBUG
-            debug_tensor_stats("memory_key", memory_key, *alloc_);
-            debug_tensor_stats("memory_shrinkage", shrink, *alloc_);
-            debug_tensor_stats("query_key", query_key, *alloc_);
-            debug_tensor_stats("query_selection", selection, *alloc_);
-
             auto similarity = ortcore::gpu_get_similarity(*alloc_, memory_key, shrink,
                                                            query_key, selection);
-
-            debug_tensor_stats("similarity", similarity, *alloc_);
             if (use_long_term_)
             {
                 auto [aff, usg] = ortcore::gpu_do_softmax(*alloc_, similarity, top_k_, true);
@@ -314,9 +283,6 @@ std::unordered_map<ObjectId, Ort::Value> MemoryManager::read(
                 auto [aff, _] = ortcore::gpu_do_softmax(*alloc_, similarity, top_k_);
                 affinity = std::move(aff);
             }
-
-            // DEBUG
-            debug_tensor_stats("affinity", affinity, *alloc_);
         }
 
         // 处理对象块
