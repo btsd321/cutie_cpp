@@ -76,3 +76,7 @@ docs/man/
 docs/xml/
 
 build.log
+
+# graphify outputs
+graphify-out/
+raw/
