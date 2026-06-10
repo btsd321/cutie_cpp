@@ -167,17 +167,6 @@ OrtCutie::OrtCutie(const core::CutieConfig& config, std::shared_ptr<linden::log:
     mask_encoder_ = create_session(require("mask_encoder.onnx"), dev);
     logger_->info("OrtCutie: loaded mask_encoder.onnx");
 
-    // Read static N from mask_encoder sensory input shape [1, N, C, H, W] (index 2, dim 1)
-    {
-        auto sensory_shape = mask_encoder_->session->GetInputTypeInfo(2)
-                                 .GetTensorTypeAndShapeInfo()
-                                 .GetShape();
-        if (sensory_shape.size() >= 2 && sensory_shape[1] > 0)
-        {
-            model_n_obj_ = static_cast<int>(sensory_shape[1]);
-            logger_->info("OrtCutie: model compiled for N={} objects (static)", model_n_obj_);
-        }
-    }
     pixel_fuser_ = create_session(require("pixel_fuser.onnx"), dev);
     logger_->info("OrtCutie: loaded pixel_fuser.onnx");
     object_transformer_ = create_session(require("object_transformer.onnx"), dev);
@@ -273,17 +262,12 @@ OrtCutie::KeyFeatures OrtCutie::transform_key(Ort::Value& f16)
 OrtCutie::MaskEncoded OrtCutie::encode_mask(Ort::Value& image, Ort::Value& pix_feat,
                                             Ort::Value& sensory, Ort::Value& masks)
 {
-    int64_t actual_n = ortcore::GpuMemoryAllocator::shape(sensory)[1];
-
-    // Pad N dimension to model_n_obj_ on GPU
-    auto padded_sensory = gpu_alloc_->pad_dim(sensory, 1, model_n_obj_);
-    auto padded_masks = gpu_alloc_->pad_dim(masks, 1, model_n_obj_);
-
+    // 动态 N 模型:直接传递真实对象数的张量,无需 pad/slice
     std::vector<Ort::Value> inputs;
     inputs.push_back(std::move(image));
     inputs.push_back(std::move(pix_feat));
-    inputs.push_back(std::move(padded_sensory));
-    inputs.push_back(std::move(padded_masks));
+    inputs.push_back(std::move(sensory));
+    inputs.push_back(std::move(masks));
 
     auto outputs = run_session(*mask_encoder_, inputs);
 
@@ -292,63 +276,50 @@ OrtCutie::MaskEncoded OrtCutie::encode_mask(Ort::Value& image, Ort::Value& pix_f
     pix_feat = std::move(inputs[1]);
 
     MaskEncoded enc;
-    enc.mask_value = gpu_alloc_->slice_dim(outputs[0], 1, actual_n);
-    enc.new_sensory = gpu_alloc_->slice_dim(outputs[1], 1, actual_n);
-    enc.obj_summaries = gpu_alloc_->slice_dim(outputs[2], 1, actual_n);
+    enc.mask_value = std::move(outputs[0]);
+    enc.new_sensory = std::move(outputs[1]);
+    enc.obj_summaries = std::move(outputs[2]);
     return enc;
 }
 
 Ort::Value OrtCutie::pixel_fusion(Ort::Value& pix_feat, Ort::Value& pixel, Ort::Value& sensory,
                                   Ort::Value& last_mask)
 {
-    int64_t actual_n = ortcore::GpuMemoryAllocator::shape(pixel)[1];
-
-    auto padded_pixel = gpu_alloc_->pad_dim(pixel, 1, model_n_obj_);
-    auto padded_sensory = gpu_alloc_->pad_dim(sensory, 1, model_n_obj_);
-    auto padded_mask = gpu_alloc_->pad_dim(last_mask, 1, model_n_obj_);
-
+    // 动态 N 模型:直接传递真实对象数的张量,无需 pad
     std::vector<Ort::Value> inputs;
     inputs.push_back(std::move(pix_feat));
-    inputs.push_back(std::move(padded_pixel));
-    inputs.push_back(std::move(padded_sensory));
-    inputs.push_back(std::move(padded_mask));
+    inputs.push_back(std::move(pixel));
+    inputs.push_back(std::move(sensory));
+    inputs.push_back(std::move(last_mask));
 
     auto outputs = run_session(*pixel_fuser_, inputs);
 
     pix_feat = std::move(inputs[0]);
 
-    return gpu_alloc_->slice_dim(outputs[0], 1, actual_n);
+    return std::move(outputs[0]);
 }
 
 Ort::Value OrtCutie::readout_query(Ort::Value& pixel_readout, Ort::Value& obj_memory)
 {
-    int64_t actual_n = ortcore::GpuMemoryAllocator::shape(pixel_readout)[1];
-
-    auto padded_readout = gpu_alloc_->pad_dim(pixel_readout, 1, model_n_obj_);
-    auto padded_obj_mem = gpu_alloc_->pad_dim(obj_memory, 1, model_n_obj_);
-
+    // 动态 N 模型:直接传递真实对象数的张量,无需 pad
     std::vector<Ort::Value> inputs;
-    inputs.push_back(std::move(padded_readout));
-    inputs.push_back(std::move(padded_obj_mem));
+    inputs.push_back(std::move(pixel_readout));
+    inputs.push_back(std::move(obj_memory));
 
     auto outputs = run_session(*object_transformer_, inputs);
 
-    return gpu_alloc_->slice_dim(outputs[0], 1, actual_n);
+    return std::move(outputs[0]);
 }
 
 OrtCutie::SegmentResult OrtCutie::segment(Ort::Value& f8, Ort::Value& f4,
                                           Ort::Value& memory_readout, Ort::Value& sensory)
 {
-    int64_t actual_n = ortcore::GpuMemoryAllocator::shape(memory_readout)[1];
-
-    auto padded_readout = gpu_alloc_->pad_dim(memory_readout, 1, model_n_obj_);
-    auto padded_sensory = gpu_alloc_->pad_dim(sensory, 1, model_n_obj_);
-
+    // 动态 N 模型:直接传递真实对象数的张量,无需 pad
     std::vector<Ort::Value> inputs;
     inputs.push_back(std::move(f8));
     inputs.push_back(std::move(f4));
-    inputs.push_back(std::move(padded_readout));
-    inputs.push_back(std::move(padded_sensory));
+    inputs.push_back(std::move(memory_readout));
+    inputs.push_back(std::move(sensory));
 
     auto outputs = run_session(*mask_decoder_, inputs);
 
@@ -356,8 +327,8 @@ OrtCutie::SegmentResult OrtCutie::segment(Ort::Value& f8, Ort::Value& f4,
     f4 = std::move(inputs[1]);
 
     SegmentResult seg;
-    seg.new_sensory = gpu_alloc_->slice_dim(outputs[0], 1, actual_n);
-    seg.logits = gpu_alloc_->slice_dim(outputs[1], 1, actual_n);
+    seg.new_sensory = std::move(outputs[0]);
+    seg.logits = std::move(outputs[1]);
     return seg;
 }
 

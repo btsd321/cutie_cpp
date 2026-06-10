@@ -369,8 +369,9 @@ def main():
     print(f"  Trace resolution: {H}×{W} (model supports dynamic resolution at runtime), Objects: {n_obj}\n")
 
     # ── Dynamic-axes specs for each submodule ──────────────────────
-    # All spatial dimensions (H/W at each scale) are marked dynamic so
-    # the exported ONNX can accept any resolution at runtime.
+    # All spatial dimensions (H/W at each scale) AND object count (N, dim=1)
+    # are marked dynamic so the exported ONNX can accept any resolution and
+    # any number of objects at runtime (no upper limit on N).
     dyn_pe = {
         'image':    {2: 'h',   3: 'w'},
         'f16':      {2: 'h16', 3: 'w16'},
@@ -387,31 +388,31 @@ def main():
     dyn_me = {
         'image':        {2: 'h',   3: 'w'},
         'pix_feat':     {2: 'h16', 3: 'w16'},
-        'sensory':      {3: 'h16', 4: 'w16'},
-        'masks':        {2: 'h',   3: 'w'},
-        'mask_value':   {3: 'h16', 4: 'w16'},
-        'new_sensory':  {3: 'h16', 4: 'w16'},
-        'obj_summaries': {},  # [1, N, 1, Q, ED+1] — no spatial dims
+        'sensory':      {1: 'n_obj', 3: 'h16', 4: 'w16'},
+        'masks':        {1: 'n_obj', 2: 'h',   3: 'w'},
+        'mask_value':   {1: 'n_obj', 3: 'h16', 4: 'w16'},
+        'new_sensory':  {1: 'n_obj', 3: 'h16', 4: 'w16'},
+        'obj_summaries': {1: 'n_obj'},  # [1, N, 1, Q, ED+1]
     }
     dyn_pf = {
         'pix_feat':  {2: 'h16', 3: 'w16'},
-        'pixel':     {3: 'h16', 4: 'w16'},
-        'sensory':   {3: 'h16', 4: 'w16'},
-        'last_mask': {2: 'h16', 3: 'w16'},
-        'fused':     {3: 'h16', 4: 'w16'},
+        'pixel':     {1: 'n_obj', 3: 'h16', 4: 'w16'},
+        'sensory':   {1: 'n_obj', 3: 'h16', 4: 'w16'},
+        'last_mask': {1: 'n_obj', 2: 'h16', 3: 'w16'},
+        'fused':     {1: 'n_obj', 3: 'h16', 4: 'w16'},
     }
     dyn_ot = {
-        'pixel_readout':   {3: 'h16', 4: 'w16'},
-        'obj_memory':      {},  # [1, N, 1, Q, ED+1] — no spatial dims
-        'updated_readout': {3: 'h16', 4: 'w16'},
+        'pixel_readout':   {1: 'n_obj', 3: 'h16', 4: 'w16'},
+        'obj_memory':      {1: 'n_obj'},  # [1, N, 1, Q, ED+1]
+        'updated_readout': {1: 'n_obj', 3: 'h16', 4: 'w16'},
     }
     dyn_md = {
         'f8':             {2: 'h8',  3: 'w8'},
         'f4':             {2: 'h4',  3: 'w4'},
-        'memory_readout': {3: 'h16', 4: 'w16'},
-        'sensory':        {3: 'h16', 4: 'w16'},
-        'new_sensory':    {3: 'h16', 4: 'w16'},
-        'logits':         {2: 'h4',  3: 'w4'},
+        'memory_readout': {1: 'n_obj', 3: 'h16', 4: 'w16'},
+        'sensory':        {1: 'n_obj', 3: 'h16', 4: 'w16'},
+        'new_sensory':    {1: 'n_obj', 3: 'h16', 4: 'w16'},
+        'logits':         {1: 'n_obj', 2: 'h4',  3: 'w4'},
     }
     # ──────────────────────────────────────────────────────────────
 

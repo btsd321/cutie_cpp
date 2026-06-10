@@ -113,14 +113,6 @@ TrtCutie::TrtCutie(const core::CutieConfig& config,
         auto engine = builder.get_or_build_engine(onnx_path, engine_path, build_config);
         mask_encoder_ = std::make_unique<trtcore::TrtHandler>(std::move(engine), dev, logger_);
         logger_->info("TrtCutie: mask_encoder 加载成功");
-
-        // 读取静态对象数 N
-        auto sensory_shape = mask_encoder_->get_binding_shape("sensory");
-        if (sensory_shape.size() >= 2 && sensory_shape[1] > 0)
-        {
-            model_n_obj_ = static_cast<int>(sensory_shape[1]);
-            logger_->info("TrtCutie: 模型编译支持 N={} 个对象（静态）", model_n_obj_);
-        }
     }
 
     // 加载 pixel_fuser

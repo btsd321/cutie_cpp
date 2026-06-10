@@ -244,7 +244,6 @@ private:
 
     int model_h_ = 0;  ///< Model input height
     int model_w_ = 0;  ///< Model input width
-    int model_n_obj_ = 0;  ///< Model max objects
 
     // ONNX Runtime sessions for each submodule
     SessionPtr pixel_encoder_;  ///< Pixel encoder session
