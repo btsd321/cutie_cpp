@@ -26,6 +26,48 @@ namespace cutie
 namespace ortcore
 {
 
+// ── CUDA 后端 OrtAllocator ─────────────────────────────────────────
+// 通过自定义 OrtAllocator 让 Ort::Value 拥有 GPU 缓冲：
+// CreateTensor(allocator, ...) 创建的张量在析构时会回调 Free → cudaFree，
+// 从而修复"外部指针建张量、析构不释放显存"导致的持续泄漏。
+struct GpuMemoryAllocator::CudaAllocatorImpl : OrtAllocator
+{
+    const OrtMemoryInfo* mem_info = nullptr;
+
+    explicit CudaAllocatorImpl(const OrtMemoryInfo* info) : mem_info(info)
+    {
+        version = ORT_API_VERSION;
+        Alloc = &CudaAllocatorImpl::AllocImpl;
+        Free = &CudaAllocatorImpl::FreeImpl;
+        Info = &CudaAllocatorImpl::InfoImpl;
+        Reserve = &CudaAllocatorImpl::AllocImpl;  // 同 Alloc，无独立保留策略
+    }
+
+    static void* ORT_API_CALL AllocImpl(OrtAllocator* /*this_*/, size_t size)
+    {
+        void* ptr = nullptr;
+        cudaError_t err = cudaMalloc(&ptr, size);
+        if (err != cudaSuccess)
+        {
+            return nullptr;  // ORT 会将 nullptr 视为分配失败
+        }
+        return ptr;
+    }
+
+    static void ORT_API_CALL FreeImpl(OrtAllocator* /*this_*/, void* p)
+    {
+        if (p != nullptr)
+        {
+            cudaFree(p);
+        }
+    }
+
+    static const OrtMemoryInfo* ORT_API_CALL InfoImpl(const OrtAllocator* this_)
+    {
+        return static_cast<const CudaAllocatorImpl*>(this_)->mem_info;
+    }
+};
+
 // ── 构造 / 析构 ────────────────────────────────────────────────────
 // 初始化 GPU 内存分配器，设置 CUDA 设备和内存信息。
 GpuMemoryAllocator::GpuMemoryAllocator(int device_id)
@@ -39,6 +81,10 @@ GpuMemoryAllocator::GpuMemoryAllocator(int device_id)
         throw std::runtime_error(std::string("GpuMemoryAllocator: cudaSetDevice failed: ") +
                                  cudaGetErrorString(err));
     }
+
+    // 初始化 CUDA 后端 OrtAllocator（指向本对象持有的 gpu_memory_info_）
+    cuda_alloc_ = std::make_unique<CudaAllocatorImpl>(
+        static_cast<const OrtMemoryInfo*>(gpu_memory_info_));
 }
 
 GpuMemoryAllocator::~GpuMemoryAllocator() = default;
@@ -83,18 +129,9 @@ void GpuMemoryAllocator::compute_strides(const std::vector<int64_t>& s, int axis
 
 Ort::Value GpuMemoryAllocator::allocate(const std::vector<int64_t>& s)
 {
-    int64_t total = numel(s);
-    float* gpu_ptr = nullptr;
-    cudaError_t err = cudaMalloc(&gpu_ptr, total * sizeof(float));
-    if (err != cudaSuccess)
-    {
-        throw std::runtime_error(std::string("GpuMemoryAllocator::allocate cudaMalloc failed: ") +
-                                 cudaGetErrorString(err));
-    }
-    // 用外部指针创建 Ort::Value（不拥有内存，需要手动管理）
-    // 注意：这里使用 ORT 的外部内存接口。
-    // CreateTensor 通过 memory_info 告诉 ORT 数据在 GPU 上。
-    return Ort::Value::CreateTensor<float>(gpu_memory_info_, gpu_ptr, total, s.data(), s.size());
+    // 用 CUDA 后端 OrtAllocator 分配：返回的 Ort::Value 拥有该 GPU 缓冲，
+    // 析构时 ORT 自动回调 CudaAllocatorImpl::Free → cudaFree，不再泄漏。
+    return Ort::Value::CreateTensor<float>(cuda_alloc_.get(), s.data(), s.size());
 }
 
 Ort::Value GpuMemoryAllocator::zeros(const std::vector<int64_t>& s)

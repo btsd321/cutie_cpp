@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -275,6 +276,11 @@ public:
 private:
     int device_id_;  ///< CUDA device ID
     Ort::MemoryInfo gpu_memory_info_;  ///< GPU memory info
+
+    /// CUDA 后端的 OrtAllocator —— 使 Ort::Value 拥有并在析构时释放 GPU 缓冲，
+    /// 避免外部指针建张量导致的显存泄漏（析构不 cudaFree）。
+    struct CudaAllocatorImpl;
+    std::unique_ptr<CudaAllocatorImpl> cuda_alloc_;
 
     /**
      * @brief Compute outer and inner strides for dimension.
