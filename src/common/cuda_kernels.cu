@@ -175,9 +175,9 @@ __global__ void aggregate_softmax_kernel(const float* prob_no_bg, float* out, in
             max_logit = logit;
     }
 
-    // 3. softmax
-    float sum_exp = expf(bg_logit - max_logit);
-    out[px] = sum_exp;  // bg channel
+    // 3. softmax：先累加所有 exp，再统一归一化
+    float bg_exp = expf(bg_logit - max_logit);
+    float sum_exp = bg_exp;  // 初始化为 bg_exp，不要提前写入 out
 
     for (int o = 0; o < num_obj; ++o)
     {
@@ -185,12 +185,14 @@ __global__ void aggregate_softmax_kernel(const float* prob_no_bg, float* out, in
         float p_clamped = fmaxf(1e-7f, fminf(1.0f - 1e-7f, p));
         float logit = logf(p_clamped / (1.0f - p_clamped));
         float e = expf(logit - max_logit);
-        out[(o + 1) * hw + px] = e;
+        out[(o + 1) * hw + px] = e;  // 暂存未归一化的 exp
         sum_exp += e;
     }
 
+    // 统一归一化所有通道（包括 bg）
     float inv = 1.0f / sum_exp;
-    for (int c = 0; c < num_ch; ++c)
+    out[px] = bg_exp * inv;  // bg channel，现在用完整的 sum_exp
+    for (int c = 1; c < num_ch; ++c)
     {
         out[c * hw + px] *= inv;
     }
@@ -243,12 +245,16 @@ void softmax_channels(const float* logits, float* out, int C, int hw)
 
 // ── get_similarity ──────────────────────────────────────────────────
 // memory_key: [B, CK, N], memory_shrinkage: [B, 1, N]
-// query_key: [B, CK, HW], query_selection: [B, CK, HW]
+// query_key: [B, CK, HW], query_selection(qe): [B, CK, HW]
 // out: [B, N, HW]
-// similarity(b,n,hw) = sum_c( mk[b,c,n] * ms[b,0,n] * qk[b,c,hw] * qs[b,c,hw] )
-
+//
+// 严格对齐 Python 原版（XMem 公式，含 selection 加权的负平方欧氏距离）：
+//   a_sq(n,hw)   = sum_c( mk[c,n]^2 * qe[c,hw] )
+//   two_ab(n,hw) = 2 * sum_c( mk[c,n] * qk[c,hw] * qe[c,hw] )
+//   b_sq(n,hw)   = sum_c( qe[c,hw] * qk[c,hw]^2 )
+//   similarity   = (-a_sq + two_ab - b_sq) * ms[n] / sqrt(CK)
 __global__ void get_similarity_kernel(const float* mk, const float* ms, const float* qk,
-                                      const float* qs, float* out, int B, int CK, int N, int HW)
+                                      const float* qe, float* out, int B, int CK, int N, int HW)
 {
     // 每个线程处理一个 (b, n, hw) 位置
     int64_t idx = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -260,15 +266,22 @@ __global__ void get_similarity_kernel(const float* mk, const float* ms, const fl
     int n = (idx / HW) % N;
     int b = idx / (N * HW);
 
-    float shrink = ms[b * N + n];
-    float sum = 0.0f;
+    float a_sq = 0.0f;    // sum_c( mk^2 * qe )
+    float two_ab = 0.0f;  // sum_c( mk * qk * qe )
+    float b_sq = 0.0f;    // sum_c( qe * qk^2 )
     for (int c = 0; c < CK; ++c)
     {
-        float m = mk[b * CK * N + c * N + n] * shrink;
-        float q = qk[b * CK * HW + c * HW + hw] * qs[b * CK * HW + c * HW + hw];
-        sum += m * q;
+        float m = mk[b * CK * N + c * N + n];
+        float q = qk[b * CK * HW + c * HW + hw];
+        float e = qe[b * CK * HW + c * HW + hw];
+        a_sq += m * m * e;
+        two_ab += m * q * e;
+        b_sq += e * q * q;
     }
-    out[idx] = sum;
+
+    float shrink = ms[b * N + n];
+    float sim = (-a_sq + 2.0f * two_ab - b_sq) * shrink / sqrtf((float)CK);
+    out[idx] = sim;
 }
 
 void get_similarity(const float* memory_key, const float* memory_shrinkage,

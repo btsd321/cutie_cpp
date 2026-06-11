@@ -271,9 +271,12 @@ OrtCutie::MaskEncoded OrtCutie::encode_mask(Ort::Value& image, Ort::Value& pix_f
 
     auto outputs = run_session(*mask_encoder_, inputs);
 
-    // Restore input ownership
+    // Restore input ownership（按引用借入的张量必须全部归还，
+    // 否则调用方持有的 last_mask 等会被置空，下一帧读取时崩溃）
     image = std::move(inputs[0]);
     pix_feat = std::move(inputs[1]);
+    sensory = std::move(inputs[2]);
+    masks = std::move(inputs[3]);
 
     MaskEncoded enc;
     enc.mask_value = std::move(outputs[0]);
@@ -294,7 +297,11 @@ Ort::Value OrtCutie::pixel_fusion(Ort::Value& pix_feat, Ort::Value& pixel, Ort::
 
     auto outputs = run_session(*pixel_fuser_, inputs);
 
+    // Restore input ownership（保持 by-reference 借入语义一致）
     pix_feat = std::move(inputs[0]);
+    pixel = std::move(inputs[1]);
+    sensory = std::move(inputs[2]);
+    last_mask = std::move(inputs[3]);
 
     return std::move(outputs[0]);
 }
@@ -307,6 +314,10 @@ Ort::Value OrtCutie::readout_query(Ort::Value& pixel_readout, Ort::Value& obj_me
     inputs.push_back(std::move(obj_memory));
 
     auto outputs = run_session(*object_transformer_, inputs);
+
+    // Restore input ownership（保持 by-reference 借入语义一致）
+    pixel_readout = std::move(inputs[0]);
+    obj_memory = std::move(inputs[1]);
 
     return std::move(outputs[0]);
 }
@@ -323,8 +334,12 @@ OrtCutie::SegmentResult OrtCutie::segment(Ort::Value& f8, Ort::Value& f4,
 
     auto outputs = run_session(*mask_decoder_, inputs);
 
+    // Restore input ownership（按引用借入的张量必须全部归还，
+    // 调试探针访问已 move 的张量会崩；保持 by-reference 借入语义一致）
     f8 = std::move(inputs[0]);
     f4 = std::move(inputs[1]);
+    memory_readout = std::move(inputs[2]);
+    sensory = std::move(inputs[3]);
 
     SegmentResult seg;
     seg.new_sensory = std::move(outputs[0]);
