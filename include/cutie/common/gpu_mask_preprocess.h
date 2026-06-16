@@ -21,23 +21,29 @@ namespace cuda
 
 /// GPU mask nearest resize：int32 index mask。
 /// cv::cuda::resize 不支持 int32 类型，需自写 kernel。
-/// @param src      GPU int32 源 mask [src_h, src_w]
-/// @param src_h, src_w  源尺寸
-/// @param dst      GPU int32 目标 mask [dst_h, dst_w]
+/// @param src       GPU int32 源 mask [src_h, src_w]
+/// @param src_h, src_w  源尺寸（逻辑尺寸）
+/// @param src_pitch 源内存每行实际元素数（step/sizeof(int32_t)），处理非连续内存
+/// @param dst       GPU int32 目标 mask [dst_h, dst_w]
 /// @param dst_h, dst_w  目标尺寸
-/// @param stream   CUDA stream
-void launch_resize_mask_nearest(const int32_t* src, int src_h, int src_w, int32_t* dst, int dst_h,
-                                int dst_w, cudaStream_t stream = nullptr);
+/// @param dst_pitch 目标内存每行实际元素数（step/sizeof(int32_t)），处理非连续内存
+/// @param stream    CUDA stream
+void launch_resize_mask_nearest(const int32_t* src, int src_h, int src_w, int src_pitch,
+                                int32_t* dst, int dst_h, int dst_w, int dst_pitch,
+                                cudaStream_t stream = nullptr);
 
 /// GPU mask pad：int32 mask → 扩展尺寸，填充 0。
-/// @param src      GPU int32 源 mask [src_h, src_w]
+/// @param src       GPU int32 源 mask [src_h, src_w]
 /// @param src_h, src_w  源尺寸
-/// @param dst      GPU int32 目标 mask [dst_h, dst_w]
+/// @param src_pitch 源内存每行实际元素数（step/sizeof(int32_t)）
+/// @param dst       GPU int32 目标 mask [dst_h, dst_w]
 /// @param dst_h, dst_w  目标尺寸（含 pad）
-/// @param pad_top  顶部 pad 行数
-/// @param pad_left 左侧 pad 列数
-/// @param stream   CUDA stream
-void launch_pad_mask(const int32_t* src, int src_h, int src_w, int32_t* dst, int dst_h, int dst_w,
+/// @param dst_pitch 目标内存每行实际元素数（step/sizeof(int32_t)）
+/// @param pad_top   顶部 pad 行数
+/// @param pad_left  左侧 pad 列数
+/// @param stream    CUDA stream
+void launch_pad_mask(const int32_t* src, int src_h, int src_w, int src_pitch,
+                     int32_t* dst, int dst_h, int dst_w, int dst_pitch,
                      int pad_top, int pad_left, cudaStream_t stream = nullptr);
 
 }  // namespace cuda

@@ -316,6 +316,14 @@ Ort::Value GpuMemoryAllocator::wrap_gpumat(const cv::cuda::GpuMat& gpu_mat,
         throw std::runtime_error("GpuMemoryAllocator::wrap_gpumat: shape/size mismatch");
     }
 
+    // [PITCH-SAFETY] GpuMat 必须紧密布局，否则 Ort tensor 的扁平视图会与行 padding 错位
+    if (!gpu_mat.isContinuous())
+    {
+        throw std::runtime_error(
+            "GpuMemoryAllocator::wrap_gpumat: GpuMat 非连续 (step != cols*elemSize)，"
+            "若直接 wrap 会因行 padding 导致内存错位。请先 clone() 转为紧密布局再 wrap。");
+    }
+
     float* gpu_ptr = reinterpret_cast<float*>(gpu_mat.data);
     return Ort::Value::CreateTensor<float>(gpu_memory_info_, gpu_ptr, total, s.data(), s.size());
 }

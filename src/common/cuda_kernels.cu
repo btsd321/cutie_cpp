@@ -377,42 +377,62 @@ void top_k_softmax(const float* similarity, float* affinity, float* usage, int B
 
 // ── one_hot_encode ──────────────────────────────────────────────────
 
-__global__ void one_hot_encode_kernel(const int32_t* mask, const int32_t* objects, float* out,
-                                      int num_obj, int hw)
+/// one_hot_encode kernel：处理有 pitch padding 的 mask。
+/// mask 用 [y * mask_pitch + x] 寻址，out 用紧密 [y * w + x] 寻址。
+__global__ void one_hot_encode_kernel(const int32_t* mask, int mask_pitch, int h, int w,
+                                      const int32_t* objects, float* out, int num_obj)
 {
     int px = blockIdx.x * blockDim.x + threadIdx.x;
-    if (px >= hw)
-        return;
-    int32_t val = mask[px];
+    int hw = h * w;
+    if (px >= hw) return;
+
+    // 从线性索引 px 计算出 (y, x)
+    int y = px / w;
+    int x = px % w;
+
+    // 读取 mask 时用 pitch，写入 out 时用紧密布局
+    int32_t val = mask[y * mask_pitch + x];
     for (int o = 0; o < num_obj; ++o)
         out[o * hw + px] = (val == objects[o]) ? 1.0f : 0.0f;
 }
 
-void one_hot_encode(const int32_t* mask, const int32_t* objects, float* out, int num_obj, int hw)
+void one_hot_encode(const int32_t* mask, int mask_pitch, int h, int w,
+                    const int32_t* objects, float* out, int num_obj)
 {
-    one_hot_encode_kernel<<<div_ceil(hw, kBlockSize), kBlockSize>>>(mask, objects, out, num_obj, hw);
+    int hw = h * w;
+    one_hot_encode_kernel<<<div_ceil(hw, kBlockSize), kBlockSize>>>(
+        mask, mask_pitch, h, w, objects, out, num_obj);
     CUDA_CHECK(cudaGetLastError());
 }
 
 // ── mask_merge_zero ─────────────────────────────────────────────────
 
+/// mask_merge_zero kernel：处理有 pitch padding 的 input_mask。
 __global__ void mask_merge_zero_kernel(float* pred_no_bg, const int32_t* input_mask,
-                                       int num_existing, int hw)
+                                       int mask_pitch, int h, int w, int num_existing)
 {
     int px = blockIdx.x * blockDim.x + threadIdx.x;
-    if (px >= hw)
-        return;
-    if (input_mask[px] > 0)
+    int hw = h * w;
+    if (px >= hw) return;
+
+    // 从线性索引 px 计算出 (y, x)
+    int y = px / w;
+    int x = px % w;
+
+    // 读取 input_mask 时用 pitch
+    if (input_mask[y * mask_pitch + x] > 0)
     {
         for (int o = 0; o < num_existing; ++o)
             pred_no_bg[o * hw + px] = 0.0f;
     }
 }
 
-void mask_merge_zero(float* pred_no_bg, const int32_t* input_mask, int num_existing, int hw)
+void mask_merge_zero(float* pred_no_bg, const int32_t* input_mask, int mask_pitch,
+                     int h, int w, int num_existing)
 {
-    mask_merge_zero_kernel<<<div_ceil(hw, kBlockSize), kBlockSize>>>(pred_no_bg, input_mask,
-                                                                     num_existing, hw);
+    int hw = h * w;
+    mask_merge_zero_kernel<<<div_ceil(hw, kBlockSize), kBlockSize>>>(
+        pred_no_bg, input_mask, mask_pitch, h, w, num_existing);
     CUDA_CHECK(cudaGetLastError());
 }
 

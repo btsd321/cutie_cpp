@@ -18,8 +18,11 @@ namespace cuda
 
 /// nearest neighbor resize kernel（int32 mask）。
 /// 每个线程处理一个输出像素。
+/// src_pitch / dst_pitch：GpuMat 内存每行实际 int32 元素数（step / sizeof(int32_t)）。
+/// CUDA 分配的 GpuMat 行尾可能有对齐 padding，必须用 pitch 而非 cols 寻址。
 __global__ void resize_mask_nearest_kernel(const int32_t* __restrict__ src, int src_h, int src_w,
-                                           int32_t* __restrict__ dst, int dst_h, int dst_w)
+                                           int src_pitch, int32_t* __restrict__ dst, int dst_h,
+                                           int dst_w, int dst_pitch)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -31,29 +34,63 @@ __global__ void resize_mask_nearest_kernel(const int32_t* __restrict__ src, int 
     sx = min(sx, src_w - 1);
     sy = min(sy, src_h - 1);
 
-    dst[y * dst_w + x] = src[sy * src_w + sx];
+    // 使用 pitch（含 padding）寻址，与 GpuMat::step 一致
+    dst[y * dst_pitch + x] = src[sy * src_pitch + sx];
 }
 
-void launch_resize_mask_nearest(const int32_t* src, int src_h, int src_w, int32_t* dst, int dst_h,
-                                int dst_w, cudaStream_t stream)
+void launch_resize_mask_nearest(const int32_t* src, int src_h, int src_w, int src_pitch,
+                                int32_t* dst, int dst_h, int dst_w, int dst_pitch,
+                                cudaStream_t stream)
 {
+    // [DIAG] 打印完整参数（含 pitch）
+    printf("[launch_resize_mask_nearest] src: h=%d w=%d pitch=%d | dst: h=%d w=%d pitch=%d\n",
+           src_h, src_w, src_pitch, dst_h, dst_w, dst_pitch);
+    if (src_pitch != src_w)
+        printf("[launch_resize_mask_nearest] WARNING: src_pitch(%d) != src_w(%d), 有 padding\n",
+               src_pitch, src_w);
+    if (dst_pitch != dst_w)
+        printf("[launch_resize_mask_nearest] WARNING: dst_pitch(%d) != dst_w(%d), 有 padding\n",
+               dst_pitch, dst_w);
+
     dim3 block(32, 8);
     dim3 grid((dst_w + block.x - 1) / block.x, (dst_h + block.y - 1) / block.y);
 
-    resize_mask_nearest_kernel<<<grid, block, 0, stream>>>(src, src_h, src_w, dst, dst_h, dst_w);
+    resize_mask_nearest_kernel<<<grid, block, 0, stream>>>(src, src_h, src_w, src_pitch,
+                                                            dst, dst_h, dst_w, dst_pitch);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess)
     {
         fprintf(stderr, "launch_resize_mask_nearest kernel error: %s\n", cudaGetErrorString(err));
     }
+
+    // [DIAG] kernel 执行后：用 pitch 正确寻址验证几个采样点
+    cudaStreamSynchronize(stream);
+    if (dst_h > 10 && dst_w > 10) {
+        int32_t v[8];
+        // dst 用 pitch 寻址（与 kernel 一致）
+        cudaMemcpy(&v[0], &dst[0 * dst_pitch + 0],   sizeof(int32_t), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&v[1], &dst[0 * dst_pitch + 1],   sizeof(int32_t), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&v[2], &dst[1 * dst_pitch + 0],   sizeof(int32_t), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&v[3], &dst[10 * dst_pitch + 10], sizeof(int32_t), cudaMemcpyDeviceToHost);
+        // src 也用 pitch 寻址
+        cudaMemcpy(&v[4], &src[0 * src_pitch + 0],   sizeof(int32_t), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&v[5], &src[0 * src_pitch + 1],   sizeof(int32_t), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&v[6], &src[1 * src_pitch + 0],   sizeof(int32_t), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&v[7], &src[10 * src_pitch + 10], sizeof(int32_t), cudaMemcpyDeviceToHost);
+        printf("[launch_resize_mask_nearest] 验证(pitch寻址): "
+               "dst(r0c0)=%d dst(r1c0)=%d dst(r0c1)=%d dst(r10c10)=%d | "
+               "src(r0c0)=%d src(r1c0)=%d src(r0c1)=%d src(r10c10)=%d\n",
+               v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]);
+    }
 }
 
 /// pad mask kernel：每个线程处理输出 mask 的一个像素。
 /// pad 区域填 0，有效区域从 src 拷贝。
+/// src_pitch / dst_pitch：GpuMat 内存每行实际 int32 元素数（step / sizeof(int32_t)）。
 __global__ void pad_mask_kernel(const int32_t* __restrict__ src, int src_h, int src_w,
-                                int32_t* __restrict__ dst, int dst_h, int dst_w, int pad_top,
-                                int pad_left)
+                                int src_pitch, int32_t* __restrict__ dst, int dst_h, int dst_w,
+                                int dst_pitch, int pad_top, int pad_left)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -62,24 +99,38 @@ __global__ void pad_mask_kernel(const int32_t* __restrict__ src, int src_h, int 
     int rx = x - pad_left;
     int ry = y - pad_top;
 
+    // 使用 pitch（含 padding）寻址，与 GpuMat::step 一致
     if (rx < 0 || rx >= src_w || ry < 0 || ry >= src_h)
     {
-        dst[y * dst_w + x] = 0;
+        dst[y * dst_pitch + x] = 0;
     }
     else
     {
-        dst[y * dst_w + x] = src[ry * src_w + rx];
+        dst[y * dst_pitch + x] = src[ry * src_pitch + rx];
     }
 }
 
-void launch_pad_mask(const int32_t* src, int src_h, int src_w, int32_t* dst, int dst_h, int dst_w,
+void launch_pad_mask(const int32_t* src, int src_h, int src_w, int src_pitch,
+                     int32_t* dst, int dst_h, int dst_w, int dst_pitch,
                      int pad_top, int pad_left, cudaStream_t stream)
 {
+    // [DIAG] 打印完整参数（含 pitch）
+    printf("[launch_pad_mask] src: h=%d w=%d pitch=%d | dst: h=%d w=%d pitch=%d | "
+           "pad_top=%d pad_left=%d\n",
+           src_h, src_w, src_pitch, dst_h, dst_w, dst_pitch, pad_top, pad_left);
+    if (src_pitch != src_w)
+        printf("[launch_pad_mask] WARNING: src_pitch(%d) != src_w(%d), 有 padding\n",
+               src_pitch, src_w);
+    if (dst_pitch != dst_w)
+        printf("[launch_pad_mask] WARNING: dst_pitch(%d) != dst_w(%d), 有 padding\n",
+               dst_pitch, dst_w);
+
     dim3 block(32, 8);
     dim3 grid((dst_w + block.x - 1) / block.x, (dst_h + block.y - 1) / block.y);
 
-    pad_mask_kernel<<<grid, block, 0, stream>>>(src, src_h, src_w, dst, dst_h, dst_w, pad_top,
-                                                 pad_left);
+    pad_mask_kernel<<<grid, block, 0, stream>>>(src, src_h, src_w, src_pitch,
+                                                dst, dst_h, dst_w, dst_pitch,
+                                                pad_top, pad_left);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess)
@@ -103,14 +154,37 @@ cv::cuda::GpuMat gpu_resize_mask_nearest(const cv::cuda::GpuMat& mask, int targe
         return mask.clone();
     }
 
+    // [DIAG] 打印调用参数
+    printf("[gpu_resize_mask_nearest] 输入: mask.rows=%d cols=%d (实际 H×W), "
+           "target_h=%d target_w=%d, step=%zu, continuous=%d\n",
+           mask.rows, mask.cols, target_h, target_w, mask.step, mask.isContinuous());
+
+    // [DIAG] 检查 step 是否影响寻址
+    int src_pitch = static_cast<int>(mask.step / sizeof(int32_t));
+    if (mask.step != mask.cols * sizeof(int32_t)) {
+        printf("[gpu_resize_mask_nearest] WARNING: step(%zu) != cols*4(%zu), 有 padding! "
+               "src_pitch=%d (实际每行元素数)\n",
+               mask.step, mask.cols * sizeof(int32_t), src_pitch);
+    }
+
     cv::cuda::GpuMat result(target_h, target_w, CV_32SC1);
+
+    // [DIAG] 检查输出 result 的 step
+    int dst_pitch = static_cast<int>(result.step / sizeof(int32_t));
+    printf("[gpu_resize_mask_nearest] 输出 result: rows=%d cols=%d step=%zu pitch=%d, continuous=%d\n",
+           result.rows, result.cols, result.step, dst_pitch, result.isContinuous());
 
     // GpuMat 可能有 step 对齐（非连续）。对于 CV_32SC1 连续分配的情况直接使用 data 指针。
     // 如果 mask 有 padding（step > cols * elemSize），需确保 kernel 正确处理。
-    // 此处假设 mask 是连续的（GpuMat(H,W,type) 默认连续分配）。
+    // 传入 src_pitch (step/sizeof(int32_t)) 而不是 cols，处理非连续内存。
     cuda::launch_resize_mask_nearest(reinterpret_cast<const int32_t*>(mask.data), mask.rows,
-                                     mask.cols, reinterpret_cast<int32_t*>(result.data), target_h,
-                                     target_w, stream);
+                                     mask.cols, src_pitch,
+                                     reinterpret_cast<int32_t*>(result.data), target_h,
+                                     target_w, dst_pitch, stream);
+
+    cudaStreamSynchronize(stream);
+    printf("[gpu_resize_mask_nearest] 输出: result.rows=%d cols=%d step=%zu pitch=%d\n",
+           result.rows, result.cols, result.step, dst_pitch);
 
     return result;
 }
@@ -129,8 +203,24 @@ cv::cuda::GpuMat gpu_pad_mask(const cv::cuda::GpuMat& mask, const std::array<int
     int dst_w = mask.cols + left + right;
     cv::cuda::GpuMat result(dst_h, dst_w, CV_32SC1);
 
+    // [DIAG] 检查 src/dst step vs cols*4
+    int src_pitch = static_cast<int>(mask.step / sizeof(int32_t));
+    int dst_pitch = static_cast<int>(result.step / sizeof(int32_t));
+    printf("[gpu_pad_mask] src: rows=%d cols=%d step=%zu pitch=%d | "
+           "dst: rows=%d cols=%d step=%zu pitch=%d\n",
+           mask.rows, mask.cols, mask.step, src_pitch,
+           result.rows, result.cols, result.step, dst_pitch);
+    if (mask.step != mask.cols * sizeof(int32_t))
+        printf("[gpu_pad_mask] WARNING: src step(%zu) != cols*4(%zu), src 有 padding!\n",
+               mask.step, mask.cols * sizeof(int32_t));
+    if (result.step != result.cols * sizeof(int32_t))
+        printf("[gpu_pad_mask] WARNING: dst step(%zu) != cols*4(%zu), dst 有 padding!\n",
+               result.step, result.cols * sizeof(int32_t));
+
     cuda::launch_pad_mask(reinterpret_cast<const int32_t*>(mask.data), mask.rows, mask.cols,
-                          reinterpret_cast<int32_t*>(result.data), dst_h, dst_w, top, left, stream);
+                          src_pitch,
+                          reinterpret_cast<int32_t*>(result.data), dst_h, dst_w, dst_pitch,
+                          top, left, stream);
 
     return result;
 }
@@ -163,6 +253,8 @@ Ort::Value gpu_preprocess_mask(GpuMemoryAllocator& alloc, const cv::cuda::GpuMat
     auto one_hot_gpu = alloc.zeros({total_num_objects, H, W});
 
     const int32_t* d_mask = reinterpret_cast<const int32_t*>(padded.data);
+    int mask_pitch = static_cast<int>(padded.step / sizeof(int32_t));
+
     for (int mi = 0; mi < num_input_obj; ++mi)
     {
         // 找到 objects[mi] 在全局对象列表中的通道索引
@@ -170,8 +262,8 @@ Ort::Value gpu_preprocess_mask(GpuMemoryAllocator& alloc, const cv::cuda::GpuMat
         // 调用者需确保 objects 的 channel 映射正确。
         // 这里简单地按 objects 顺序写入对应的通道（调用者负责映射）。
         // 实际使用中，InferenceCore::step_gpu_impl 中会像原 step() 一样处理通道映射。
-        cuda::one_hot_encode(d_mask, d_objects + mi,
-                             GpuMemoryAllocator::data_ptr(one_hot_gpu) + mi * HW, 1, HW);
+        cuda::one_hot_encode(d_mask, mask_pitch, H, W, d_objects + mi,
+                             GpuMemoryAllocator::data_ptr(one_hot_gpu) + mi * HW, 1);
     }
 
     cudaFree(d_objects);

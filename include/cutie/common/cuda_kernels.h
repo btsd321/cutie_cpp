@@ -54,14 +54,20 @@ void top_k_softmax(const float* similarity, float* affinity, float* usage, int B
                    int top_k);
 
 /// idx mask → one-hot 编码。
-/// mask: [H*W] int32,  objects: [num_obj] int32
-/// out: [num_obj, H*W] float32
-void one_hot_encode(const int32_t* mask, const int32_t* objects, float* out, int num_obj, int hw);
+/// mask: [H, W] int32（可能有 pitch padding）,  objects: [num_obj] int32
+/// out: [num_obj, H*W] float32（紧密布局）
+/// @param mask_pitch mask 每行实际元素数（step/sizeof(int32_t)），处理 GpuMat 行对齐
+/// @param h, w  mask 的逻辑行列数
+void one_hot_encode(const int32_t* mask, int mask_pitch, int h, int w,
+                    const int32_t* objects, float* out, int num_obj);
 
 /// 合并预测 mask 和输入 mask。
-/// pred_no_bg: [num_existing, HW],  input_mask: [HW] int32
+/// pred_no_bg: [num_existing, HW],  input_mask: [H, W] int32（可能有 pitch padding）
 /// 将 input_mask > 0 的位置在 pred_no_bg 中置零。
-void mask_merge_zero(float* pred_no_bg, const int32_t* input_mask, int num_existing, int hw);
+/// @param mask_pitch input_mask 每行实际元素数（step/sizeof(int32_t)）
+/// @param h, w  mask 的逻辑行列数
+void mask_merge_zero(float* pred_no_bg, const int32_t* input_mask, int mask_pitch,
+                     int h, int w, int num_existing);
 
 /// GPU 上的 memset 为零。
 void fill_zero(float* ptr, int64_t n);

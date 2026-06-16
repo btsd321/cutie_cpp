@@ -163,6 +163,11 @@ public:
      * 将 GpuMat 包装为 Ort::Value（零拷贝，共享 GPU 内存）。
      * 注意：GpuMat 的生命周期必须超过返回的 Ort::Value。
      *
+     * @warning 仅在 GpuMat 紧密布局（step == cols * elemSize, isContinuous()==true）时
+     *          可安全使用。新分配的 GpuMat 行尾通常有 cudaMallocPitch 对齐 padding，
+     *          直接 wrap 会让 Ort::Value 的扁平视图与 GpuMat 行布局错位，导致后续
+     *          kernel 读到错误数据。若 GpuMat 非连续，请先 clone() 再 wrap。
+     *
      * @param gpu_mat Source GpuMat
      * @param shape Tensor shape (total elements must match GpuMat)
      * @return GPU Ort::Value (shares memory with GpuMat)
@@ -175,6 +180,11 @@ public:
      *
      * 将 Ort::Value 的 GPU 指针包装为 GpuMat（零拷贝）。
      * 注意：Ort::Value 的生命周期必须超过返回的 GpuMat。
+     *
+     * @warning 返回的 GpuMat 用 `step = cols * elemSize`（紧密布局），与 Ort tensor
+     *          的扁平内存布局一致。但 OpenCV CUDA API（如 cv::cuda::resize）通常假定
+     *          GpuMat 行已按 cudaMallocPitch 对齐，传入此非对齐 GpuMat 可能导致
+     *          性能下降或某些算子失败。建议仅用于值访问/调试。
      *
      * @param tensor Source GPU Ort::Value
      * @param rows Number of rows

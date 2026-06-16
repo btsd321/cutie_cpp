@@ -25,13 +25,14 @@ namespace cuda
 /// GPU argmax kernel：prob [num_ch, H, W] → index_mask [H, W] int32。
 /// channel 0 = background (输出 0)，channel i → objects[i-1]。
 /// @param prob     GPU float32 概率图，CHW 连续布局
-/// @param num_ch   通道数（num_objects + 1）
-/// @param H, W     空间尺寸
-/// @param objects  GPU int32 数组，长度 num_ch-1，ObjectId 映射
-/// @param out      GPU int32 输出 [H, W]
-/// @param stream   CUDA stream
+/// @param num_ch    通道数（num_objects + 1）
+/// @param H, W      空间尺寸（逻辑尺寸）
+/// @param objects   GPU int32 数组，长度 num_ch-1，ObjectId 映射
+/// @param out       GPU int32 输出 [H, W]
+/// @param out_pitch 输出每行实际元素数（step/sizeof(int32_t)），处理 GpuMat 行对齐 padding
+/// @param stream    CUDA stream
 void launch_argmax_index(const float* prob, int num_ch, int H, int W, const int32_t* objects,
-                         int32_t* out, cudaStream_t stream = nullptr);
+                         int32_t* out, int out_pitch, cudaStream_t stream = nullptr);
 
 /// GPU unpad kernel：[C, padH, padW] → [C, H, W] 逐通道 D2D 拷贝。
 /// @param src      GPU float32 源张量 [C, padH, padW]
