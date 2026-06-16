@@ -41,98 +41,6 @@
 
 namespace cutie
 {
-namespace
-{
-// 诊断：把 GPU mask（CV_32SC1，值=ObjectId）download 到 CPU，打印每个 id 的中心+面积
-void diag_log_id_centers(const cv::cuda::GpuMat& gpu_mask,
-                         const std::vector<ObjectId>& ids,
-                         linden::log::ILogger* logger, const std::string& tag)
-{
-    if (!logger || gpu_mask.empty() || ids.empty()) return;
-    cv::Mat cpu;
-    gpu_mask.download(cpu);
-    if (cpu.type() != CV_32SC1) cpu.convertTo(cpu, CV_32SC1);
-
-    // [DIAG] 打印 mask 尺寸和实际内存布局
-    logger->info("[CUTIE-DIAG] {} mask: rows={} cols={} (rows=H, cols=W), step={}, continuous={}",
-                 tag, cpu.rows, cpu.cols, cpu.step[0], cpu.isContinuous());
-
-    for (auto oid : ids)
-    {
-        cv::Mat eq;
-        cv::compare(cpu, static_cast<int>(oid), eq, cv::CMP_EQ);
-        int area = cv::countNonZero(eq);
-        if (area == 0)
-        {
-            logger->info("[CUTIE-DIAG] {} ID={} 像素=0", tag, static_cast<int>(oid));
-            continue;
-        }
-        cv::Moments m = cv::moments(eq, true);
-        float cx = static_cast<float>(m.m10 / m.m00);
-        float cy = static_cast<float>(m.m01 / m.m00);
-
-        // [DIAG] 找前5个非零像素的实际 (row, col) 位置验证内存布局
-        std::vector<std::pair<int,int>> samples;
-        for (int r = 0; r < cpu.rows && samples.size() < 5; ++r) {
-            for (int c = 0; c < cpu.cols && samples.size() < 5; ++c) {
-                if (cpu.at<int32_t>(r, c) == static_cast<int>(oid)) {
-                    samples.push_back({r, c});
-                }
-            }
-        }
-        std::string samples_str;
-        for (auto [r, c] : samples) {
-            samples_str += "(" + std::to_string(c) + "," + std::to_string(r) + ") ";
-        }
-
-        logger->info("[CUTIE-DIAG] {} ID={} center=({:.1f},{:.1f}) area={}px | "
-                     "前5个像素(x,y): {}",
-                     tag, static_cast<int>(oid), cx, cy, area, samples_str);
-    }
-}
-
-// 诊断：把 prob tensor [C,H,W] 的指定通道 argmax 中心提取出来（仅诊断用，CPU 路径）
-void diag_log_prob_centers(const Ort::Value& prob, const std::vector<ObjectId>& obj_ids,
-                           linden::log::ILogger* logger, const std::string& tag)
-{
-    if (!logger || !prob.IsTensor()) return;
-#ifdef ENABLE_ONNXRUNTIME
-    auto shape = ortcore::GpuMemoryAllocator::shape(prob);
-    if (shape.size() < 3) return;
-    int C = static_cast<int>(shape[0]);
-    int H = static_cast<int>(shape[1]);
-    int W = static_cast<int>(shape[2]);
-    int HW = H * W;
-    // 下载到 CPU（仅诊断）
-    std::vector<float> host(C * HW);
-    cudaMemcpy(host.data(), ortcore::GpuMemoryAllocator::data_ptr(prob),
-               C * HW * sizeof(float), cudaMemcpyDeviceToHost);
-    // bg=ch0；ch i+1 对应 obj_ids[i]
-    for (size_t i = 0; i < obj_ids.size() && static_cast<int>(i + 1) < C; ++i)
-    {
-        const float* ch = host.data() + (i + 1) * HW;
-        // argmax over channel: 取 prob > 0.5 视为前景，算 moments
-        cv::Mat fg(H, W, CV_8UC1);
-        for (int p = 0; p < HW; ++p) fg.data[p] = (ch[p] > 0.5f) ? 255 : 0;
-        int area = cv::countNonZero(fg);
-        if (area == 0)
-        {
-            logger->info("[CUTIE-DIAG] {} ID={} prob>0.5 像素=0 (tensor rows={} cols={})", tag,
-                         static_cast<int>(obj_ids[i]), H, W);
-            continue;
-        }
-        cv::Moments m = cv::moments(fg, true);
-        float cx = static_cast<float>(m.m10 / m.m00);
-        float cy = static_cast<float>(m.m01 / m.m00);
-        logger->info("[CUTIE-DIAG] {} ID={} center=({:.1f},{:.1f}) area={}px (tensor rows={} cols={})",
-                     tag, static_cast<int>(obj_ids[i]), cx, cy, area, H, W);
-    }
-#else
-    (void)prob; (void)obj_ids; (void)tag;
-#endif
-}
-}  // namespace
-
 namespace core
 {
 
@@ -446,17 +354,6 @@ types::GpuCutieMask InferenceCore::Impl::step_gpu_impl(const cv::cuda::GpuMat& g
 
     bool resize_needed = (orig_h != target_h || orig_w != target_w);
 
-    // [CUTIE-DIAG] 入口尺寸 + target 尺寸
-    logger->info("[CUTIE-DIAG] step_gpu_impl 入口: orig rows={} cols={} (rows=H,cols=W), "
-                 "target rows={} cols={}, resize_needed={}, max_internal_size={}",
-                 orig_h, orig_w, target_h, target_w, resize_needed, cfg.max_internal_size);
-    if (!gpu_mask.empty())
-    {
-        logger->info("[CUTIE-DIAG] gpu_mask 入口: rows={} cols={}, type={}",
-                     gpu_mask.rows, gpu_mask.cols, gpu_mask.type());
-        diag_log_id_centers(gpu_mask, objects, logger.get(), "①入口gpu_mask(orig坐标)");
-    }
-
 #ifdef ENABLE_ONNXRUNTIME
     auto& alloc = network->gpu_alloc();
 
@@ -465,12 +362,6 @@ types::GpuCutieMask InferenceCore::Impl::step_gpu_impl(const cv::cuda::GpuMat& g
                                                                  alloc);
     pad = pad_out;
     cached_image_gpu = std::move(image_gpu_val);
-
-    // [CUTIE-DIAG] 图像预处理后 pad 信息
-    logger->info("[CUTIE-DIAG] 图像 preprocess 后 pad=[top={}, bottom={}, left={}, right={}], "
-                 "padded={}x{} (期望 target={}x{})",
-                 pad[0], pad[1], pad[2], pad[3], target_h + pad[0] + pad[1],
-                 target_w + pad[2] + pad[3], target_h, target_w);
 #endif
 
     bool is_mem_frame = ((curr_ti - last_mem_ti >= mem_every) || !gpu_mask.empty()) && !end;
@@ -498,105 +389,11 @@ types::GpuCutieMask InferenceCore::Impl::step_gpu_impl(const cv::cuda::GpuMat& g
         cv::cuda::GpuMat resized_mask = gpu_mask;
         if (resize_needed)
         {
-            logger->info("[CUTIE-DIAG] 即将调用 gpu_resize_mask_nearest: gpu_mask.rows={} cols={}, "
-                         "target_h={} target_w={}",
-                         gpu_mask.rows, gpu_mask.cols, target_h, target_w);
             resized_mask = ortcore::gpu_resize_mask_nearest(gpu_mask, target_h, target_w);
-            logger->info("[CUTIE-DIAG] gpu_resize_mask_nearest 返回: resized_mask.rows={} cols={}",
-                         resized_mask.rows, resized_mask.cols);
         }
-
-        // [CUTIE-DIAG] mask resize 后
-        logger->info("[CUTIE-DIAG] resized_mask: {}x{} (rows=H, cols=W), resize_needed={}",
-                     resized_mask.rows, resized_mask.cols, resize_needed);
-
-        // [DIAG] 验证 resize 映射关系：下载前后对比
-        if (resize_needed && logger)
-        {
-            cv::Mat src_cpu, dst_cpu;
-            gpu_mask.download(src_cpu);
-            resized_mask.download(dst_cpu);
-            if (src_cpu.type() != CV_32SC1) src_cpu.convertTo(src_cpu, CV_32SC1);
-            if (dst_cpu.type() != CV_32SC1) dst_cpu.convertTo(dst_cpu, CV_32SC1);
-
-            for (auto oid : objects)
-            {
-                if (oid == 0) continue;
-                // 在源 mask 找第一个非零像素
-                int src_r = -1, src_c = -1;
-                for (int r = 0; r < src_cpu.rows && src_r < 0; ++r) {
-                    for (int c = 0; c < src_cpu.cols && src_r < 0; ++c) {
-                        if (src_cpu.at<int32_t>(r, c) == static_cast<int>(oid)) {
-                            src_r = r; src_c = c;
-                        }
-                    }
-                }
-                if (src_r < 0) continue;
-
-                // 计算该源像素在目标中的预期位置
-                int exp_dst_c = src_c * dst_cpu.cols / src_cpu.cols;
-                int exp_dst_r = src_r * dst_cpu.rows / src_cpu.rows;
-
-                // 在目标 mask 找第一个非零像素
-                int dst_r = -1, dst_c = -1;
-                for (int r = 0; r < dst_cpu.rows && dst_r < 0; ++r) {
-                    for (int c = 0; c < dst_cpu.cols && dst_r < 0; ++c) {
-                        if (dst_cpu.at<int32_t>(r, c) == static_cast<int>(oid)) {
-                            dst_r = r; dst_c = c;
-                        }
-                    }
-                }
-
-                // [DIAG] 额外验证：反向查询 - 目标首像素对应源的哪个位置
-                int back_src_c = -1, back_src_r = -1;
-                if (dst_r >= 0 && dst_c >= 0) {
-                    // kernel 逻辑：sx = x * src_w / dst_w, sy = y * src_h / dst_h
-                    back_src_c = dst_c * src_cpu.cols / dst_cpu.cols;
-                    back_src_r = dst_r * src_cpu.rows / dst_cpu.rows;
-                    // 检查源的该位置是否真的是这个 ID
-                    int32_t src_val_at_back = src_cpu.at<int32_t>(back_src_r, back_src_c);
-
-                    // [DIAG] 再多采样几个目标像素验证
-                    std::string sample_str;
-                    for (int offset = 0; offset < 3 && (dst_c + offset) < dst_cpu.cols; ++offset) {
-                        int test_dst_c = dst_c + offset;
-                        int test_src_c = test_dst_c * src_cpu.cols / dst_cpu.cols;
-                        int test_src_r = dst_r * src_cpu.rows / dst_cpu.rows;
-                        int32_t src_val = src_cpu.at<int32_t>(test_src_r, test_src_c);
-                        int32_t dst_val = dst_cpu.at<int32_t>(dst_r, test_dst_c);
-                        sample_str += "dst(" + std::to_string(test_dst_c) + "," +
-                                      std::to_string(dst_r) + ")→src(" +
-                                      std::to_string(test_src_c) + "," +
-                                      std::to_string(test_src_r) + "):" +
-                                      std::to_string(dst_val) + "/" +
-                                      std::to_string(src_val) + "; ";
-                    }
-
-                    logger->info("[CUTIE-DIAG] resize映射验证 ID={}: "
-                                 "源首像素(c,r)=({},{}) → 预期目标({},{}) vs 实际目标({},{}), "
-                                 "反查: 目标({},{})应采样源({},{}), 源该位置值={} | 采样验证: {}",
-                                 static_cast<int>(oid), src_c, src_r, exp_dst_c, exp_dst_r,
-                                 dst_c, dst_r, dst_c, dst_r, back_src_c, back_src_r,
-                                 src_val_at_back, sample_str);
-                }
-                else {
-                    logger->info("[CUTIE-DIAG] resize映射验证 ID={}: 源首像素(c,r)=({},{}) → "
-                                 "预期目标({},{}) vs 实际目标({},{})",
-                                 static_cast<int>(oid), src_c, src_r, exp_dst_c, exp_dst_r,
-                                 dst_c, dst_r);
-                }
-            }
-        }
-
-        diag_log_id_centers(resized_mask, objects, logger.get(), "②mask resize后(target坐标)");
 
         // GPU pad mask
         cv::cuda::GpuMat padded_mask = ortcore::gpu_pad_mask(resized_mask, pad);
-
-        // [CUTIE-DIAG] mask pad 后
-        logger->info("[CUTIE-DIAG] padded_mask: rows={} cols={}, pad=[top={},left={}]",
-                     padded_mask.rows, padded_mask.cols, pad[0], pad[2]);
-        diag_log_id_centers(padded_mask, objects, logger.get(), "③mask pad后(padded坐标)");
 
         int H = padded_mask.rows;
         int W = padded_mask.cols;
@@ -606,12 +403,6 @@ types::GpuCutieMask InferenceCore::Impl::step_gpu_impl(const cv::cuda::GpuMat& g
         // GPU mask data pointer（已在 GPU 上）
         const int32_t* d_mask = reinterpret_cast<const int32_t*>(padded_mask.data);
         int mask_pitch = static_cast<int>(padded_mask.step / sizeof(int32_t));
-
-        // [DIAG] 检查 padded_mask 的 pitch
-        if (padded_mask.step != padded_mask.cols * sizeof(int32_t)) {
-            logger->info("[CUTIE-DIAG] padded_mask 有 padding: step={} vs cols*4={}, pitch={}",
-                         padded_mask.step, padded_mask.cols * sizeof(int32_t), mask_pitch);
-        }
 
         // 上传 objects 数组到 GPU（通常 <20 个 int32，开销可忽略）
         std::vector<int32_t> obj_i32(objects.begin(), objects.end());
@@ -707,50 +498,16 @@ types::GpuCutieMask InferenceCore::Impl::step_gpu_impl(const cv::cuda::GpuMat& g
     if (pred_prob_with_bg.IsTensor())
     {
 #ifdef ENABLE_ONNXRUNTIME
-        // [CUTIE-DIAG] unpad 前 prob shape
-        {
-            auto s = ortcore::GpuMemoryAllocator::shape(pred_prob_with_bg);
-            logger->info("[CUTIE-DIAG] pred_prob_with_bg shape=[C={}, rows={}, cols={}] (unpad前)",
-                         s.size() > 0 ? s[0] : -1, s.size() > 1 ? s[1] : -1,
-                         s.size() > 2 ? s[2] : -1);
-            diag_log_prob_centers(pred_prob_with_bg, object_manager.all_obj_ids(), logger.get(),
-                                  "④prob unpad前(padded坐标)");
-        }
-
         auto prob_unpadded = ortcore::gpu_unpad(alloc, pred_prob_with_bg, pad);
-
-        // [CUTIE-DIAG] unpad 后 prob shape + 中心
-        {
-            auto s = ortcore::GpuMemoryAllocator::shape(prob_unpadded);
-            logger->info("[CUTIE-DIAG] prob_unpadded shape=[C={}, rows={}, cols={}] (unpad后, "
-                         "期望 rows={} cols={})",
-                         s.size() > 0 ? s[0] : -1, s.size() > 1 ? s[1] : -1,
-                         s.size() > 2 ? s[2] : -1, target_h, target_w);
-            diag_log_prob_centers(prob_unpadded, object_manager.all_obj_ids(), logger.get(),
-                                  "⑤prob unpad后(target坐标)");
-        }
 
         if (resize_needed)
         {
             prob_unpadded = alloc.resize_channels(prob_unpadded, orig_h, orig_w);
-
-            // [CUTIE-DIAG] resize_channels 后
-            auto s = ortcore::GpuMemoryAllocator::shape(prob_unpadded);
-            logger->info("[CUTIE-DIAG] prob resize_channels(rows={},cols={}) 后 "
-                         "shape=[C={}, rows={}, cols={}]",
-                         orig_h, orig_w, s.size() > 0 ? s[0] : -1, s.size() > 1 ? s[1] : -1,
-                         s.size() > 2 ? s[2] : -1);
-            diag_log_prob_centers(prob_unpadded, object_manager.all_obj_ids(), logger.get(),
-                                  "⑥prob resize回orig后(orig坐标)");
         }
 
         result.index_mask =
             ortcore::gpu_prob_to_index_mask(alloc, prob_unpadded, object_manager.all_obj_ids());
         result.gpu_prob = std::move(prob_unpadded);
-
-        // [CUTIE-DIAG] 最终 index_mask 中心
-        diag_log_id_centers(result.index_mask, object_manager.all_obj_ids(), logger.get(),
-                            "⑦最终index_mask(应=orig坐标)");
 #endif
     }
 

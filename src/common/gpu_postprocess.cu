@@ -50,13 +50,6 @@ __global__ void argmax_index_kernel(const float* __restrict__ prob, int num_ch, 
 void launch_argmax_index(const float* prob, int num_ch, int H, int W, const int32_t* objects,
                          int32_t* out, int out_pitch, cudaStream_t stream)
 {
-    // [DIAG]
-    printf("[launch_argmax_index] H=%d W=%d num_ch=%d out_pitch=%d\n",
-           H, W, num_ch, out_pitch);
-    if (out_pitch != W)
-        printf("[launch_argmax_index] WARNING: out_pitch(%d) != W(%d), 输出有 padding\n",
-               out_pitch, W);
-
     dim3 block(32, 8);
     dim3 grid((W + block.x - 1) / block.x, (H + block.y - 1) / block.y);
 
@@ -150,15 +143,7 @@ cv::cuda::GpuMat gpu_prob_to_index_mask(GpuMemoryAllocator& alloc, const Ort::Va
 
     // 分配输出 GpuMat
     cv::cuda::GpuMat index_mask(H, W, CV_32SC1);
-
-    // [DIAG] 检查 index_mask 的 step 对齐
     int out_pitch = static_cast<int>(index_mask.step / sizeof(int32_t));
-    if (index_mask.step != index_mask.cols * sizeof(int32_t))
-    {
-        printf("[gpu_prob_to_index_mask] WARNING: index_mask step=%zu vs cols*4=%zu, "
-               "有 padding! pitch=%d\n",
-               index_mask.step, index_mask.cols * sizeof(int32_t), out_pitch);
-    }
 
     if (num_ch <= 1 || objects.empty())
     {
@@ -176,51 +161,6 @@ cv::cuda::GpuMat gpu_prob_to_index_mask(GpuMemoryAllocator& alloc, const Ort::Va
 
     cuda::launch_argmax_index(GpuMemoryAllocator::data_ptr(prob_with_bg), num_ch, H, W, d_objects,
                               reinterpret_cast<int32_t*>(index_mask.data), out_pitch, stream);
-
-    // [DIAG] argmax 后采样验证：在 prob 上找 ID 中心区域，看看 argmax 输出是否对应
-    cudaStreamSynchronize(stream);
-    {
-        // 下载部分 prob[c=1] 数据 + index_mask 第一行/中间行做对比
-        std::vector<float> prob_ch1(static_cast<size_t>(H) * W);
-        cudaMemcpy(prob_ch1.data(),
-                   GpuMemoryAllocator::data_ptr(prob_with_bg) + static_cast<size_t>(H) * W,
-                   prob_ch1.size() * sizeof(float), cudaMemcpyDeviceToHost);
-        // 找前景中心
-        double sum_x = 0, sum_y = 0;
-        int cnt = 0;
-        for (int y = 0; y < H; ++y) {
-            for (int x = 0; x < W; ++x) {
-                if (prob_ch1[static_cast<size_t>(y) * W + x] > 0.5f) {
-                    sum_x += x; sum_y += y; cnt++;
-                }
-            }
-        }
-        if (cnt > 0) {
-            printf("[gpu_prob_to_index_mask] DIAG: prob[ch=1]>0.5 像素数=%d, "
-                   "中心=(%.1f, %.1f) (H=%d W=%d)\n",
-                   cnt, sum_x / cnt, sum_y / cnt, H, W);
-        }
-
-        // 下载 index_mask 验证 argmax 输出位置
-        std::vector<int32_t> idx_cpu(static_cast<size_t>(H) * out_pitch);
-        cudaMemcpy(idx_cpu.data(), index_mask.data,
-                   static_cast<size_t>(H) * index_mask.step, cudaMemcpyDeviceToHost);
-        long long sum_x2 = 0, sum_y2 = 0;
-        int cnt2 = 0;
-        for (int y = 0; y < H; ++y) {
-            for (int x = 0; x < W; ++x) {
-                if (idx_cpu[static_cast<size_t>(y) * out_pitch + x] != 0) {
-                    sum_x2 += x; sum_y2 += y; cnt2++;
-                }
-            }
-        }
-        if (cnt2 > 0) {
-            printf("[gpu_prob_to_index_mask] DIAG: index_mask 非零像素=%d, "
-                   "中心=(%.1f, %.1f) (H=%d W=%d, step=%zu, pitch=%d)\n",
-                   cnt2, static_cast<double>(sum_x2) / cnt2,
-                   static_cast<double>(sum_y2) / cnt2, H, W, index_mask.step, out_pitch);
-        }
-    }
 
     cudaFree(d_objects);
 

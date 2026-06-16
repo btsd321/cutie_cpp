@@ -42,16 +42,6 @@ void launch_resize_mask_nearest(const int32_t* src, int src_h, int src_w, int sr
                                 int32_t* dst, int dst_h, int dst_w, int dst_pitch,
                                 cudaStream_t stream)
 {
-    // [DIAG] 打印完整参数（含 pitch）
-    printf("[launch_resize_mask_nearest] src: h=%d w=%d pitch=%d | dst: h=%d w=%d pitch=%d\n",
-           src_h, src_w, src_pitch, dst_h, dst_w, dst_pitch);
-    if (src_pitch != src_w)
-        printf("[launch_resize_mask_nearest] WARNING: src_pitch(%d) != src_w(%d), 有 padding\n",
-               src_pitch, src_w);
-    if (dst_pitch != dst_w)
-        printf("[launch_resize_mask_nearest] WARNING: dst_pitch(%d) != dst_w(%d), 有 padding\n",
-               dst_pitch, dst_w);
-
     dim3 block(32, 8);
     dim3 grid((dst_w + block.x - 1) / block.x, (dst_h + block.y - 1) / block.y);
 
@@ -62,26 +52,6 @@ void launch_resize_mask_nearest(const int32_t* src, int src_h, int src_w, int sr
     if (err != cudaSuccess)
     {
         fprintf(stderr, "launch_resize_mask_nearest kernel error: %s\n", cudaGetErrorString(err));
-    }
-
-    // [DIAG] kernel 执行后：用 pitch 正确寻址验证几个采样点
-    cudaStreamSynchronize(stream);
-    if (dst_h > 10 && dst_w > 10) {
-        int32_t v[8];
-        // dst 用 pitch 寻址（与 kernel 一致）
-        cudaMemcpy(&v[0], &dst[0 * dst_pitch + 0],   sizeof(int32_t), cudaMemcpyDeviceToHost);
-        cudaMemcpy(&v[1], &dst[0 * dst_pitch + 1],   sizeof(int32_t), cudaMemcpyDeviceToHost);
-        cudaMemcpy(&v[2], &dst[1 * dst_pitch + 0],   sizeof(int32_t), cudaMemcpyDeviceToHost);
-        cudaMemcpy(&v[3], &dst[10 * dst_pitch + 10], sizeof(int32_t), cudaMemcpyDeviceToHost);
-        // src 也用 pitch 寻址
-        cudaMemcpy(&v[4], &src[0 * src_pitch + 0],   sizeof(int32_t), cudaMemcpyDeviceToHost);
-        cudaMemcpy(&v[5], &src[0 * src_pitch + 1],   sizeof(int32_t), cudaMemcpyDeviceToHost);
-        cudaMemcpy(&v[6], &src[1 * src_pitch + 0],   sizeof(int32_t), cudaMemcpyDeviceToHost);
-        cudaMemcpy(&v[7], &src[10 * src_pitch + 10], sizeof(int32_t), cudaMemcpyDeviceToHost);
-        printf("[launch_resize_mask_nearest] 验证(pitch寻址): "
-               "dst(r0c0)=%d dst(r1c0)=%d dst(r0c1)=%d dst(r10c10)=%d | "
-               "src(r0c0)=%d src(r1c0)=%d src(r0c1)=%d src(r10c10)=%d\n",
-               v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]);
     }
 }
 
@@ -114,17 +84,6 @@ void launch_pad_mask(const int32_t* src, int src_h, int src_w, int src_pitch,
                      int32_t* dst, int dst_h, int dst_w, int dst_pitch,
                      int pad_top, int pad_left, cudaStream_t stream)
 {
-    // [DIAG] 打印完整参数（含 pitch）
-    printf("[launch_pad_mask] src: h=%d w=%d pitch=%d | dst: h=%d w=%d pitch=%d | "
-           "pad_top=%d pad_left=%d\n",
-           src_h, src_w, src_pitch, dst_h, dst_w, dst_pitch, pad_top, pad_left);
-    if (src_pitch != src_w)
-        printf("[launch_pad_mask] WARNING: src_pitch(%d) != src_w(%d), 有 padding\n",
-               src_pitch, src_w);
-    if (dst_pitch != dst_w)
-        printf("[launch_pad_mask] WARNING: dst_pitch(%d) != dst_w(%d), 有 padding\n",
-               dst_pitch, dst_w);
-
     dim3 block(32, 8);
     dim3 grid((dst_w + block.x - 1) / block.x, (dst_h + block.y - 1) / block.y);
 
@@ -154,37 +113,17 @@ cv::cuda::GpuMat gpu_resize_mask_nearest(const cv::cuda::GpuMat& mask, int targe
         return mask.clone();
     }
 
-    // [DIAG] 打印调用参数
-    printf("[gpu_resize_mask_nearest] 输入: mask.rows=%d cols=%d (实际 H×W), "
-           "target_h=%d target_w=%d, step=%zu, continuous=%d\n",
-           mask.rows, mask.cols, target_h, target_w, mask.step, mask.isContinuous());
-
-    // [DIAG] 检查 step 是否影响寻址
     int src_pitch = static_cast<int>(mask.step / sizeof(int32_t));
-    if (mask.step != mask.cols * sizeof(int32_t)) {
-        printf("[gpu_resize_mask_nearest] WARNING: step(%zu) != cols*4(%zu), 有 padding! "
-               "src_pitch=%d (实际每行元素数)\n",
-               mask.step, mask.cols * sizeof(int32_t), src_pitch);
-    }
 
     cv::cuda::GpuMat result(target_h, target_w, CV_32SC1);
-
-    // [DIAG] 检查输出 result 的 step
     int dst_pitch = static_cast<int>(result.step / sizeof(int32_t));
-    printf("[gpu_resize_mask_nearest] 输出 result: rows=%d cols=%d step=%zu pitch=%d, continuous=%d\n",
-           result.rows, result.cols, result.step, dst_pitch, result.isContinuous());
 
-    // GpuMat 可能有 step 对齐（非连续）。对于 CV_32SC1 连续分配的情况直接使用 data 指针。
-    // 如果 mask 有 padding（step > cols * elemSize），需确保 kernel 正确处理。
-    // 传入 src_pitch (step/sizeof(int32_t)) 而不是 cols，处理非连续内存。
+    // GpuMat 行尾可能有对齐 padding（step > cols * elemSize）。
+    // 传入 src_pitch / dst_pitch (step/sizeof(int32_t)) 而不是 cols，处理非连续内存。
     cuda::launch_resize_mask_nearest(reinterpret_cast<const int32_t*>(mask.data), mask.rows,
                                      mask.cols, src_pitch,
                                      reinterpret_cast<int32_t*>(result.data), target_h,
                                      target_w, dst_pitch, stream);
-
-    cudaStreamSynchronize(stream);
-    printf("[gpu_resize_mask_nearest] 输出: result.rows=%d cols=%d step=%zu pitch=%d\n",
-           result.rows, result.cols, result.step, dst_pitch);
 
     return result;
 }
@@ -203,19 +142,8 @@ cv::cuda::GpuMat gpu_pad_mask(const cv::cuda::GpuMat& mask, const std::array<int
     int dst_w = mask.cols + left + right;
     cv::cuda::GpuMat result(dst_h, dst_w, CV_32SC1);
 
-    // [DIAG] 检查 src/dst step vs cols*4
     int src_pitch = static_cast<int>(mask.step / sizeof(int32_t));
     int dst_pitch = static_cast<int>(result.step / sizeof(int32_t));
-    printf("[gpu_pad_mask] src: rows=%d cols=%d step=%zu pitch=%d | "
-           "dst: rows=%d cols=%d step=%zu pitch=%d\n",
-           mask.rows, mask.cols, mask.step, src_pitch,
-           result.rows, result.cols, result.step, dst_pitch);
-    if (mask.step != mask.cols * sizeof(int32_t))
-        printf("[gpu_pad_mask] WARNING: src step(%zu) != cols*4(%zu), src 有 padding!\n",
-               mask.step, mask.cols * sizeof(int32_t));
-    if (result.step != result.cols * sizeof(int32_t))
-        printf("[gpu_pad_mask] WARNING: dst step(%zu) != cols*4(%zu), dst 有 padding!\n",
-               result.step, result.cols * sizeof(int32_t));
 
     cuda::launch_pad_mask(reinterpret_cast<const int32_t*>(mask.data), mask.rows, mask.cols,
                           src_pitch,
