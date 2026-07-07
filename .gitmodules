@@ -1,0 +1,3 @@
+[submodule "thirdparty/linden_logger"]
+	path = thirdparty/linden_logger
+	url = git@gitee.com:btsd321/linden_logger.git
