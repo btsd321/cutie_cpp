@@ -6,11 +6,15 @@
 
 ## 特性
 
-- 纯 C++17，零 Python 依赖，可直接嵌入生产系统
-- 支持 **ONNX Runtime**（含 CUDA EP）和 **TensorRT**（可选编译）推理后端
-- 完整的有状态推理：工作记忆 + 长期记忆 + 感知记忆（GRU 隐状态）
-- 支持多对象同时跟踪，支持中途添加/删除对象
-- RAII 风格 API，单头文件 `#include "cutie/cutie.h"` 即可使用
+- **纯 C++17**：零 Python 依赖，可直接嵌入生产系统
+- **多推理后端**：
+  - **ONNX Runtime**（默认）：含 CUDA EP，兼容性好，使用 IO Binding 避免 CPU↔GPU 数据拷贝
+  - **TensorRT**（可选）：高性能推理，支持 FP16/INT8 量化，智能引擎缓存（节省 10-60 秒启动时间）
+- **全 GPU 数据流**：输入图像 CPU→GPU 上传后，所有中间特征和内存数据保持在 GPU，仅最终结果按需下载
+- **GPU 加速预处理**：BGR→RGB 转换、resize、ImageNet 归一化、pad 全部在 GPU 上完成
+- **完整的有状态推理**：工作记忆（FIFO KV 缓冲）+ 长期记忆（可选压缩原型）+ 感知记忆（per-object GRU 隐状态）
+- **多对象跟踪**：支持同时跟踪多个对象，支持中途删除对象
+- **RAII 风格 API**：单头文件 `#include "cutie/cutie.h"` 即可使用
 
 ---
 
@@ -83,31 +87,42 @@ image ──► pixel_encoder ──► f16, f8, f4, pix_feat
 
 | 依赖 | 版本 | 必需 |
 |------|------|------|
-| CMake | ≥ 3.18 | ✅ |
+| CMake | ≥ 3.20 | ✅ |
 | GCC/Clang | GCC ≥ 9 | ✅ |
-| OpenCV | ≥ 4.0 | ✅ |
-| ONNX Runtime | ≥ 1.16 | ONNX 后端 |
-| CUDA Toolkit | ≥ 11.8 | GPU 推理 |
+| OpenCV | ≥ 4.0（含 CUDA 模块） | ✅ |
+| CUDA Toolkit | ≥ 11.8 | ✅ |
+| cuBLAS | （CUDA Toolkit 自带） | ✅ |
+| ONNX Runtime | ≥ 1.16（含 CUDA EP） | ONNX 后端 |
 | TensorRT | ≥ 10.0 | TRT 后端 |
+| linden_logger | （子项目，自动加载） | ✅ |
+
+> **注意**：项目现在要求 CUDA ≥ 11.8，构建时必须确保 CUDA Toolkit 已正确安装并可被 CMake 检测到。
 
 ### 编译步骤
 
 ```bash
-# 使用默认配置（ONNX Runtime 后端，CUDA 推理）
-bash build.sh
+# 默认构建（ONNX Runtime 后端，Release 模式）
+bash build.sh --vcpkg-root ./vcpkg/
 
-# 可选参数
-bash build.sh \
-    --cuda-root /usr/local/cuda \
-    --opencv-dir /path/to/cmake/opencv4 \
-    --onnxruntime-root /opt/onnxruntime \
-    --install-prefix /usr/local
+# Debug 构建
+bash build.sh --debug --vcpkg-root ./vcpkg/
+
+# 清理重建
+bash build.sh --clean
+
+# 指定自定义依赖路径
+bash build.sh --cuda-root /usr/local/cuda --onnxruntime-root /opt/onnxruntime
+
+# 启用 TensorRT 后端
+bash build.sh --enable-tensorrt --vcpkg-root ./vcpkg/
+
+# 同时启用两个后端
+bash build.sh --enable-onnxruntime --enable-tensorrt --vcpkg-root ./vcpkg/
 ```
 
-编译产物：
+编译产物（默认输出到 `build/` 目录）：
 - `build/libcutie.so` — 动态库
 - `build/demo_basic` — 示例程序
-- `build/include/cutie/config.h` — 生成的配置头文件
 
 安装（可选）：
 ```bash
@@ -176,6 +191,7 @@ cv::Mat mask0  = cv::imread("mask_000.png", cv::IMREAD_GRAYSCALE); // 像素值 
 auto result = processor.step(frame0, mask0, {1, 2, 3});
 
 // 4. 后续帧：仅提供图像，自动传播分割
+//    （内部自动完成 GPU 预处理、特征提取、内存管理、分割解码）
 for (auto& frame : remaining_frames) {
     auto result = processor.step(frame);
     // result.index_mask — H×W CV_32SC1，像素值为对象 ID（0 = 背景）
@@ -187,19 +203,20 @@ processor.delete_objects({2});             // 删除对象 2
 processor.clear_non_permanent_memory();   // 清除非永久记忆
 ```
 
+> **性能提示**：内部已全 GPU 化，CPU `cv::Mat` 输入会自动上传到 GPU 并缓存，所有中间计算在 GPU 完成，最终结果下载到 CPU 返回。对于高吞吐场景，可考虑使用 `cv::cuda::GpuMat` 直接传入（需要相应 API 扩展）。
+
 ---
 
 ## 运行示例
 
-```bash
-# 自动检测模型目录中的前缀并运行
-./build/demo_basic <video_path> <first_frame_mask.png>
+项目目前唯一可运行的示例为：
 
-# 或指定模型目录
-./build/demo_basic /path/to/model/dir <video_path> <first_frame_mask.png>
+```bash
+# 基本用法
+./build/demo_basic <video_path> <first_frame_mask.png>
 ```
 
-`demo_basic` 会自动扫描模型目录中 `*_pixel_encoder.onnx` 文件推断 `model_prefix`，无需手动指定。
+`demo_basic` 会自动扫描模型目录中 `*_pixel_encoder.onnx` 文件推断 `model_prefix`，无需手动指定。示例会逐帧处理视频，输出分割结果到控制台。
 
 ---
 
@@ -250,8 +267,26 @@ cutie-cpp/
 │   └── core/
 │       └── processor.h     # CutieConfig, CutieProcessor 声明
 ├── src/                    # 实现源码
-│   ├── core/               # 推理核心（记忆、对象管理等）
-│   └── ort/                # ONNX Runtime 后端
+│   ├── common/             # GPU 公共代码（ORT 和 TRT 后端共享）
+│   │   ├── cuda_kernels.cu           # CUDA kernel 实现
+│   │   ├── gpu_memory.cpp            # GPU 内存分配器
+│   │   ├── gpu_tensor_ops.cpp        # GPU 张量操作原语
+│   │   ├── gpu_image_preprocess.cu   # GPU 图像预处理
+│   │   ├── gpu_mask_preprocess.cu    # GPU 掩码预处理
+│   │   └── gpu_postprocess.cu        # GPU 后处理
+│   ├── core/               # 与平台无关的推理逻辑
+│   │   ├── inference_core.cpp        # 主推理循环
+│   │   ├── memory_manager.cpp        # 三层内存系统
+│   │   ├── kv_memory_store.cpp       # KV 内存存储
+│   │   ├── object_manager.cpp        # 对象管理
+│   │   └── processor.cpp             # 公共 API 实现
+│   ├── ort/                # ONNX Runtime 后端
+│   │   ├── ort_handler.cpp           # 会话管理
+│   │   └── ort_cutie.cpp             # 6 个子模块封装
+│   └── trt/                # TensorRT 后端
+│       ├── trt_engine_builder.cpp    # 引擎构建
+│       ├── trt_handler.cpp           # 引擎管理
+│       └── trt_cutie.cpp             # 6 个子模块封装
 ├── examples/
 │   └── demo_basic.cpp      # 基础使用示例
 ├── share/
@@ -259,6 +294,9 @@ cutie-cpp/
 │   ├── model/              # .pth 权重文件 & 导出的 ONNX 文件
 │   └── scripts/
 │       └── export_onnx.py  # PyTorch → ONNX 导出脚本
+├── .ref_project/           # 参考项目（不提交到 Git）
+│   ├── Cutie/              # 原始 PyTorch 实现
+│   └── linden_logger/      # 专有日志库
 ├── cmake/                  # CMake 查找模块
 ├── build.sh                # 一键编译脚本
 └── install.sh              # 安装脚本
