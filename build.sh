@@ -17,6 +17,7 @@ INSTALL_PREFIX="${SCRIPT_DIR}/install"
 # Backend toggles
 ENABLE_ONNXRUNTIME="ON"
 ENABLE_TENSORRT="OFF"
+ENABLE_PYTHON="OFF"
 BUILD_EXAMPLES="ON"
 
 # Model options
@@ -45,6 +46,7 @@ Build options:
   --install-prefix DIR     CMAKE_INSTALL_PREFIX      (default: /usr/local)
   --jobs N                 Parallel compile jobs     (default: nproc)
   --enable-tensorrt        Enable TensorRT backend   (default: OFF)
+  --enable-python          Build Python bindings     (default: OFF)
   --disable-onnxruntime    Disable ONNXRuntime       (default: ON)
   --disable-examples       Don't build examples      (default: ON)
   --debug                  Shorthand for --build-type Debug
@@ -76,6 +78,7 @@ while [[ $# -gt 0 ]]; do
         --install-prefix)    INSTALL_PREFIX="$2";    shift 2 ;;
         --jobs)              JOBS="$2";              shift 2 ;;
         --enable-tensorrt)   ENABLE_TENSORRT="ON";   shift   ;;
+        --enable-python)     ENABLE_PYTHON="ON";     shift   ;;
         --disable-onnxruntime) ENABLE_ONNXRUNTIME="OFF"; shift ;;
         --disable-examples)  BUILD_EXAMPLES="OFF";   shift   ;;
         --python)            PYTHON_EXECUTABLE="$2"; shift 2 ;;
@@ -102,6 +105,7 @@ CMAKE_ARGS=(
     -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}"
     -DENABLE_ONNXRUNTIME="${ENABLE_ONNXRUNTIME}"
     -DENABLE_TENSORRT="${ENABLE_TENSORRT}"
+    -DENABLE_PYTHON="${ENABLE_PYTHON}"
     -DBUILD_EXAMPLES="${BUILD_EXAMPLES}"
     -DDOWNLOAD_MODELS="${DOWNLOAD_MODELS}"
     -DEXPORT_ONNX="${EXPORT_ONNX}"
@@ -145,6 +149,7 @@ echo "  Type:        ${BUILD_TYPE}"
 echo "  Install:     ${INSTALL_PREFIX}"
 echo "  ORT:         ${ENABLE_ONNXRUNTIME}"
 echo "  TRT:         ${ENABLE_TENSORRT}"
+echo "  Python:      ${ENABLE_PYTHON}"
 echo "  Examples:    ${BUILD_EXAMPLES}"
 echo "  DlModels:    ${DOWNLOAD_MODELS}"
 echo "  ExportONNX:  ${EXPORT_ONNX}"

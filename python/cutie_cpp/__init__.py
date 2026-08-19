@@ -23,7 +23,12 @@
 模型导出见 share/scripts/export_onnx.py。
 """
 
-from cutie_cpp import _core
+from cutie_cpp._loader import cuda_library_status, load_core
+
+# 先加载扩展模块：失败时给出缺失 CUDA 库的诊断，而不是裸 ImportError。
+# 必须在导入下面这些模块之前完成，因为它们都依赖 _core。
+_core = load_core()
+
 from cutie_cpp.config import CutieConfig, Device, LongTermConfig, ModelDims, ModelVariant
 from cutie_cpp.exceptions import (
     ConfigError,
@@ -59,6 +64,8 @@ __all__ = [
     # 日志
     "setup_logging",
     "get_logger",
+    # 诊断
+    "cuda_library_status",
     # 异常
     "CutieError",
     "ConfigError",

@@ -1,4 +1,28 @@
 cmake_minimum_required(VERSION 3.18)
+
+# === nvcc 自动探测 ===
+# 必须在 project() 之前：CUDA 语言的编译器检测在 project() 时就会发生。
+# 很多环境（含 pip 构建）不会把 nvcc 加入 PATH，此处从常见安装位置回退查找。
+if(NOT CMAKE_CUDA_COMPILER AND NOT DEFINED ENV{CUDACXX})
+    find_program(_cutie_nvcc nvcc
+        HINTS
+            ENV CUDA_HOME
+            ENV CUDA_PATH
+            ENV CUDA_TOOLKIT_ROOT_DIR
+            /usr/local/cuda
+            /opt/cuda
+        PATH_SUFFIXES bin
+    )
+    if(_cutie_nvcc)
+        set(CMAKE_CUDA_COMPILER "${_cutie_nvcc}")
+        message(STATUS "Auto-detected nvcc: ${_cutie_nvcc}")
+    else()
+        message(FATAL_ERROR
+            "未找到 nvcc。请安装 CUDA Toolkit (>= 11.8) 并确保其在 PATH 中，"
+            "或显式指定 -DCMAKE_CUDA_COMPILER=/path/to/nvcc。")
+    endif()
+endif()
+
 project(cutie VERSION 0.1.0 LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -9,8 +33,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # === CUDA 设置 ===
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-# 支持 Turing(75), Ampere(80,86), Ada Lovelace(89), Hopper(90)
-set(CMAKE_CUDA_ARCHITECTURES 75 80 86 89 90)
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
 
 find_package(CUDAToolkit REQUIRED)
@@ -18,6 +40,26 @@ if(CUDAToolkit_VERSION VERSION_LESS "11.8")
     message(FATAL_ERROR "CUDA 11.8 or higher is required, found ${CUDAToolkit_VERSION}")
 endif()
 message(STATUS "CUDA Toolkit: ${CUDAToolkit_VERSION}")
+
+# === CUDA 架构选择 ===
+# 可通过 -DCUTIE_CUDA_ARCHS="89;120" 覆盖，以缩短编译时间。
+# 默认覆盖 Turing(75) / Ampere(80,86) / Ada(89) / Hopper(90)；
+# Blackwell(120) 需要 CUDA >= 12.8，故按版本条件加入。
+set(CUTIE_CUDA_ARCHS "" CACHE STRING "Target CUDA architectures (e.g. \"89;120\")")
+
+if(CUTIE_CUDA_ARCHS)
+    set(CMAKE_CUDA_ARCHITECTURES ${CUTIE_CUDA_ARCHS})
+else()
+    set(CMAKE_CUDA_ARCHITECTURES 75 80 86 89 90)
+    if(NOT CUDAToolkit_VERSION VERSION_LESS "12.8")
+        list(APPEND CMAKE_CUDA_ARCHITECTURES 120)
+    else()
+        message(WARNING
+            "CUDA ${CUDAToolkit_VERSION} 不支持 sm_120 (Blackwell)，已跳过。"
+            "如需支持 RTX 50 系列显卡，请升级到 CUDA >= 12.8。")
+    endif()
+endif()
+message(STATUS "CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 
 # === 后端选项（参考 lite.ai.toolkit 模式） ===
 option(ENABLE_ONNXRUNTIME "Build with ONNXRuntime backend" ON)
@@ -315,7 +357,10 @@ if(ENABLE_PYTHON)
     if(SKBUILD)
         # wheel 构建：扩展模块与 libcutie.so 一起装进 cutie_cpp 包目录，
         # 用 $ORIGIN 让扩展在运行时于同目录找到 libcutie.so，免设 LD_LIBRARY_PATH。
-        set_target_properties(_core PROPERTIES
+        # ONNXRuntime 与 OpenCV 已静态链入 libcutie.so，无需随包分发；
+        # CUDA 运行时（libcudart/libcublas/libcublasLt 合计约 800 MB）体积过大，
+        # 保持外部依赖，由 cutie_cpp/_loader.py 在导入失败时给出安装提示。
+        set_target_properties(_core cutie PROPERTIES
             INSTALL_RPATH "$ORIGIN"
             BUILD_WITH_INSTALL_RPATH TRUE
         )

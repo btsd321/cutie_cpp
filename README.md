@@ -207,6 +207,38 @@ processor.clear_non_permanent_memory();   // 清除非永久记忆
 
 ---
 
+## Python 绑定
+
+本库提供 Python 接口 `cutie_cpp`，用 numpy 数组完成推理，无需 PyTorch 依赖。
+每帧只有一次 H2D 上传和一次 D2H 下载，性能与 C++ 直接调用相当。
+
+```bash
+# 方式一：安装为 wheel
+pip install .
+
+# 方式二：CMake 构建（扩展模块就地输出到 python/cutie_cpp/）
+bash build.sh --enable-python --vcpkg-root ./vcpkg/
+export PYTHONPATH=$PWD/python
+```
+
+```python
+import cutie_cpp
+
+cutie_cpp.setup_logging()
+config = cutie_cpp.CutieConfig.base_default("share/model")
+
+with cutie_cpp.VideoSegmenter(config) as segmenter:
+    result = segmenter.step(first_frame, mask=first_mask)  # 首帧给掩码
+    for frame in frames:
+        result = segmenter.step(frame)                      # 后续帧自动跟踪
+        result.index_mask   # (H, W) int32，像素值 = 对象 ID
+```
+
+详细的 API 说明、配置项与示例见 [python/README.md](python/README.md)，
+可运行示例在 [python/examples/](python/examples/)。
+
+---
+
 ## 运行示例
 
 项目目前唯一可运行的示例为：

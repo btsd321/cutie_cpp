@@ -39,10 +39,14 @@ Homepage = "https://github.com/hkchengrex/Cutie"
 # 复用仓库根的 CMakeLists.txt
 cmake.source-dir = "."
 cmake.version = ">=3.18"
+# Release 构建：Debug 的 libcutie.so 带 debug_info 可达 1.2 GB，不适合分发。
+cmake.build-type = "Release"
 # 固定构建目录以复用 CUDA kernel 的编译缓存。
-# 首次构建需数分钟（要编译 5 个 GPU 架构），增量重建则很快。
+# 首次构建需数分钟，增量重建则很快。
 build-dir = "build/skbuild"
 wheel.packages = ["python/cutie_cpp"]
+# 剥离符号表进一步压缩体积（Release 下仍会残留部分调试信息）
+install.strip = true
 sdist.exclude = [
     "build",
     ".venv",
@@ -60,6 +64,10 @@ ENABLE_ONNXRUNTIME = "ON"
 BUILD_EXAMPLES = "OFF"
 DOWNLOAD_MODELS = "OFF"
 EXPORT_ONNX = "OFF"
+# 目标 GPU 架构：Ada Lovelace(89, RTX 40 系) 与 Blackwell(120, RTX 50 系)。
+# sm_120 需要 CUDA >= 12.8。要覆盖更多架构可改为 "75;80;86;89;90;120"，
+# 但每个架构都会显著增加编译时间与二进制体积。
+CUTIE_CUDA_ARCHS = "89;120"
 
 # ─── 测试配置 ────────────────────────────────────────────────────────
 

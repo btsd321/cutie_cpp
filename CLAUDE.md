@@ -33,9 +33,27 @@ bash build.sh --enable-tensorrt --vcpkg-root ./vcpkg/
 # 同时启用两个后端
 bash build.sh --enable-onnxruntime --enable-tensorrt --vcpkg-root ./vcpkg/
 
+# 启用 Python 绑定（扩展模块就地输出到 python/cutie_cpp/）
+bash build.sh --enable-python --vcpkg-root ./vcpkg/
+
 # 构建后安装
 bash install.sh
 # 或：cmake --install build/
+```
+
+Python 库的安装与测试：
+
+```bash
+# 安装为 wheel（scikit-build-core 驱动，自动编译 C++ 扩展）
+.venv/bin/pip install .
+
+# 开发模式：CMake 构建 + PYTHONPATH
+bash build.sh --enable-python --vcpkg-root ./vcpkg/
+PYTHONPATH=python .venv/bin/python -c "import cutie_cpp"
+
+# 测试（gpu 标记的用例需要 GPU 与真实模型）
+.venv/bin/python -m pytest -m "not gpu"
+.venv/bin/python -m pytest -m gpu
 ```
 
 构建产物默认输出到 `build/` 目录：`build/libcutie.so`、`build/demo_basic`。
@@ -72,6 +90,16 @@ Cutie 模型被拆分为 6 个 ONNX 子模块，每帧按顺序调用：
 - **`src/core/`** — 与平台无关的推理逻辑：`inference_core.cpp`（主循环）、`memory_manager.cpp`、`kv_memory_store.cpp`、`object_manager.cpp`、`processor.cpp`（公共 API 实现）
 - **`src/ort/`** — ONNX Runtime 后端：`ort_handler.cpp`（会话管理）、`ort_cutie.cpp`（子模块封装）
 - **`src/trt/`** — TensorRT 后端：`trt_engine_builder.cpp`（引擎构建）、`trt_handler.cpp`（引擎管理）、`trt_cutie.cpp`（子模块封装）
+- **`src/python/`** — pybind11 绑定层（`ENABLE_PYTHON=ON` 时编译为 `cutie_cpp._core`）：
+  - `module.cpp` — 模块入口，调用各注册函数
+  - `py_convert.h/.cpp` — numpy ↔ cv::Mat 零拷贝转换、GPU 张量单次 D2H 到 numpy
+  - `py_config.cpp` — `CutieConfig` / `StepOptions` / 枚举的薄映射（不做校验）
+  - `py_processor.cpp` — `CutieProcessor` 绑定，推理时释放 GIL
+  - `py_logger.h/.cpp` — C++ 日志转发到 Python `logging`
+- **`python/cutie_cpp/`** — Python 包：`segmenter.py`（`VideoSegmenter` 主类）、
+  `config.py`（dataclass 配置 + 校验 + YAML）、`results.py`、`model_zoo.py`（模型自动发现）、
+  `visualize.py`、`exceptions.py`、`utils/logging_utils.py`
+- **`python/examples/`** — Python 示例，**`python/tests/`** — pytest 测试
 - **`include/cutie/`** — 公共 API 头文件，入口为 `cutie.h`
 - **`include/cutie/core/processor.h`** — `CutieConfig` 结构体和 `CutieProcessor` 类声明
 
@@ -85,6 +113,12 @@ Cutie 模型被拆分为 6 个 ONNX 子模块，每帧按顺序调用：
 - **IO Binding（ORT）**：`OrtCutie` 使用 ONNX Runtime IO Binding API，所有子模块的输入输出直接绑定 GPU 内存，避免 CPU↔GPU 数据拷贝
 - **智能引擎缓存（TRT）**：`TrtEngineBuilder` 首次构建引擎后序列化到 `.engine` 文件，后续直接加载（节省 10-60 秒启动时间）
 - **全 GPU 数据流**：输入图像 CPU→GPU 上传后，所有中间特征和内存数据（f16/f8/f4/pix_feat、KV 记忆、sensory memory、obj_v）保持在 GPU，仅最终 logits 在输出阶段下载到 CPU
+- **Python 零拷贝约定**：绑定层每帧只有 1 次 H2D + 1 次 D2H。numpy 输入用
+  `cv::Mat(h, w, type, ptr)` 借用缓冲区（不拷贝），输出用 `cudaMemcpy2D` 直接写入
+  预分配的 numpy 缓冲区。**不要复用 `GpuCutieMask::download()`**——它会自行分配
+  `cv::Mat`，导致二次拷贝。`GpuMat` 是 pitched 内存，D2H 必须用 `cudaMemcpy2D`
+- **Python 侧校验前置**：`Device::kCPU` 在 C++ 会直接抛异常（`src/ort/cv/ort_cutie.cpp`），
+  故 Python 的 `CutieConfig.validate()` 提前拦截并给出原因。`py_config.cpp` 只做薄映射
 - **输入预处理 GPU 化**：`GpuMemoryAllocator::preprocess_image_gpu()` 将 BGR→RGB 转换、resize、ImageNet 归一化、pad 全部在 GPU 上完成（`cv::cuda::cvtColor` / `cv::cuda::resize` / `cv::cuda::copyMakeBorder`）；resize 目标尺寸优先从模型参数读取（`model_h_` / `model_w_`），若模型为动态分辨率（`model_h_` ≤ 0）则回退到 `max_internal_size` 等比缩放逻辑；`InferenceCore` 缓存 GPU 图像张量（`cached_image_gpu_`），避免同一帧重复上传；`ensure_features()` 和 `add_memory()` 不再接收 CPU `image_blob`
 
 ### 依赖项
