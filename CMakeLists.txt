@@ -22,6 +22,7 @@ message(STATUS "CUDA Toolkit: ${CUDAToolkit_VERSION}")
 # === 后端选项（参考 lite.ai.toolkit 模式） ===
 option(ENABLE_ONNXRUNTIME "Build with ONNXRuntime backend" ON)
 option(ENABLE_TENSORRT    "Build with TensorRT backend"    OFF)
+option(ENABLE_PYTHON      "Build Python bindings (cutie_cpp._core)" OFF)
 option(BUILD_EXAMPLES     "Build example programs"          ON)
 option(DOWNLOAD_MODELS    "Download .pth model weights at build time" ON)
 option(EXPORT_ONNX        "Auto-export ONNX submodules at build time if missing" OFF)
@@ -291,6 +292,43 @@ if(BUILD_EXAMPLES)
         CUTIE_BUILD_MODEL_DIR="${CUTIE_MODEL_SOURCE_DIR}"
         CUTIE_INSTALL_MODEL_DIR="${CMAKE_INSTALL_PREFIX}/share/cutie_cpp/model"
     )
+endif()
+
+# === Python 绑定（pybind11）===
+if(ENABLE_PYTHON)
+    # scikit-build-core 会注入 Python_EXECUTABLE 等变量；独立构建时自行查找。
+    find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+    find_package(pybind11 CONFIG REQUIRED)
+    message(STATUS "Python bindings: enabled (pybind11 ${pybind11_VERSION})")
+
+    pybind11_add_module(_core
+        src/python/module.cpp
+        src/python/py_config.cpp
+        src/python/py_convert.cpp
+        src/python/py_logger.cpp
+        src/python/py_processor.cpp
+    )
+
+    target_link_libraries(_core PRIVATE cutie CUDA::cudart)
+    target_include_directories(_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/python")
+
+    if(SKBUILD)
+        # wheel 构建：扩展模块与 libcutie.so 一起装进 cutie_cpp 包目录，
+        # 用 $ORIGIN 让扩展在运行时于同目录找到 libcutie.so，免设 LD_LIBRARY_PATH。
+        set_target_properties(_core PROPERTIES
+            INSTALL_RPATH "$ORIGIN"
+            BUILD_WITH_INSTALL_RPATH TRUE
+        )
+        install(TARGETS _core LIBRARY DESTINATION cutie_cpp)
+        install(TARGETS cutie LIBRARY DESTINATION cutie_cpp)
+    else()
+        # 普通构建：输出到 build/python/cutie_cpp/，便于用 PYTHONPATH 直接试用。
+        set_target_properties(_core PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/cutie_cpp"
+            INSTALL_RPATH "$ORIGIN;${CMAKE_BINARY_DIR}"
+            BUILD_RPATH "${CMAKE_BINARY_DIR}"
+        )
+    endif()
 endif()
 
 # === 安装 ===
