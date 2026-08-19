@@ -1,0 +1,72 @@
+[build-system]
+requires = ["scikit-build-core>=0.8", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "cutie-cpp"
+version = "0.1.0"
+description = "Cutie 视频目标分割 C++ 推理库的 Python 接口"
+readme = "python/README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+keywords = ["video-object-segmentation", "cutie", "onnxruntime", "cuda"]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+
+dependencies = [
+    "numpy>=1.21",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+# 示例脚本需要 OpenCV 读写视频。核心库本身不依赖它，
+# 以免与系统安装的 OpenCV C++ 库版本冲突。
+examples = ["opencv-python>=4.5"]
+test = ["pytest>=7.0", "opencv-python>=4.5"]
+
+[project.urls]
+Homepage = "https://github.com/hkchengrex/Cutie"
+
+# ─── 构建配置 ────────────────────────────────────────────────────────
+
+[tool.scikit-build]
+# 复用仓库根的 CMakeLists.txt
+cmake.source-dir = "."
+cmake.version = ">=3.18"
+# 固定构建目录以复用 CUDA kernel 的编译缓存。
+# 首次构建需数分钟（要编译 5 个 GPU 架构），增量重建则很快。
+build-dir = "build/skbuild"
+wheel.packages = ["python/cutie_cpp"]
+sdist.exclude = [
+    "build",
+    ".venv",
+    ".ref_project",
+    "share/model",
+    "share/docs",
+    "thirdparty",
+]
+
+[tool.scikit-build.cmake.define]
+ENABLE_PYTHON = "ON"
+ENABLE_ONNXRUNTIME = "ON"
+# 以下在 wheel 构建中都不需要：示例是 C++ 可执行文件，
+# 模型权重体积大且应由用户按需下载。
+BUILD_EXAMPLES = "OFF"
+DOWNLOAD_MODELS = "OFF"
+EXPORT_ONNX = "OFF"
+
+# ─── 测试配置 ────────────────────────────────────────────────────────
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]
+pythonpath = ["python"]
+addopts = "-ra --strict-markers"
+markers = [
+    "gpu: 需要 CUDA GPU 与真实 ONNX 模型的测试（用 -m \"not gpu\" 跳过）",
+]
