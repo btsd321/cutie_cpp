@@ -2,16 +2,15 @@
 #
 # build_python.sh — 构建自包含的 cutie_cpp Python wheel。
 #
-# 本脚本独立于 C++ 的 build.sh，两者使用**不同的 ONNX Runtime**：
-#   - build.sh    : vcpkg 的静态 ORT，链入 libcutie.so
-#   - 本脚本      : 官方预编译 GPU 包的动态 ORT
+# 与 C++ 的 build.sh 用同一套 vcpkg 依赖，区别只在于：
+#   - 走 scikit-build-core 产出 wheel，而非直接 cmake --build
+#   - 把运行时库（libcutie.so + ORT CUDA provider）打进包目录，
+#     靠 RPATH=$ORIGIN 解析，安装后无需设置 LD_LIBRARY_PATH
 #
-# 为什么必须分开：vcpkg 把 ORT 静态链入 libcutie.so，而 ORT 的 CUDA provider
-# 是运行时 dlopen 的插件。静态核心 + 外部 provider 会让进程里出现两个 ORT 实例，
-# 导致段错误。官方包提供动态 libonnxruntime.so，provider 能正常 bridge，
-# 且体积小得多（provider 351 MB vs vcpkg 919 MB）。
+# 关于 provider：ORT 核心被 vcpkg 静态链入 libcutie.so，但 CUDA provider 是
+# 运行时 dlopen 的插件，必须随包分发，且必须是**同一份 vcpkg 构建**的版本
+# （混用 pip 的 onnxruntime-gpu 会让进程里出现两个 ORT 实例并段错误）。
 #
-# 产出的 wheel 自带 libcutie.so、ORT 核心与 provider；
 # 用户只需自备 CUDA Toolkit (>= 11.8) 与 cuDNN 9。
 #
 # 用法:
@@ -25,18 +24,13 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ─── 默认参数 ────────────────────────────────────────────────────────
 VCPKG_ROOT=""
-ORT_VERSION="1.23.2"
-ORT_ROOT=""
+PROVIDER_DIR=""
 CUDA_ARCHS="89;120"
 PYTHON_EXE="${PROJECT_ROOT}/.venv/bin/python"
 OUTPUT_DIR="${PROJECT_ROOT}/dist"
 JOBS="$(nproc)"
 DO_CLEAN=0
 SKIP_DEPS=0
-
-# 官方预编译包的下载地址模板
-ORT_BASE_URL="https://github.com/microsoft/onnxruntime/releases/download"
-ORT_CACHE_DIR="${PROJECT_ROOT}/thirdparty/onnxruntime"
 
 # ─── 颜色输出 ────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
@@ -53,8 +47,8 @@ usage() {
   --vcpkg-root DIR      vcpkg 根目录（OpenCV CUDA 模块的来源）
 
 可选参数:
-  --ort-version VER     ONNX Runtime 版本            (默认: ${ORT_VERSION})
-  --ort-root DIR        已解包的官方 ORT 目录，跳过下载
+  --provider-dir DIR    ONNXRuntime CUDA provider 所在目录
+                        (默认从 vcpkg 的 installed/x64-linux/lib 推导)
   --cuda-archs LIST     CUDA 架构，分号分隔          (默认: ${CUDA_ARCHS})
                         89=Ada/RTX40, 120=Blackwell/RTX50
   --python PATH         Python 解释器                (默认: .venv/bin/python)
@@ -74,8 +68,7 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --vcpkg-root)   VCPKG_ROOT="$2";   shift 2 ;;
-        --ort-version)  ORT_VERSION="$2";  shift 2 ;;
-        --ort-root)     ORT_ROOT="$2";     shift 2 ;;
+        --provider-dir) PROVIDER_DIR="$2"; shift 2 ;;
         --cuda-archs)   CUDA_ARCHS="$2";   shift 2 ;;
         --python)       PYTHON_EXE="$2";   shift 2 ;;
         --output)       OUTPUT_DIR="$2";   shift 2 ;;
@@ -143,52 +136,39 @@ fi
 PYBIND11_DIR="$("${PYTHON_EXE}" -c 'import pybind11; print(pybind11.get_cmake_dir())')" \
     || die "无法定位 pybind11 的 CMake 目录"
 
-# ─── 4. 准备官方 ONNX Runtime GPU 包 ─────────────────────────────────
-# 官方包同时提供动态 libonnxruntime.so、CUDA provider 插件和头文件，
-# 是 wheel 能自包含的前提。
-prepare_onnxruntime() {
-    local tarball_name="onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz"
-    local extract_dir="${ORT_CACHE_DIR}/onnxruntime-linux-x64-gpu-${ORT_VERSION}"
-    local tarball_path="${ORT_CACHE_DIR}/${tarball_name}"
+# ─── 4. 校验 ONNXRuntime CUDA provider ───────────────────────────────
+# provider 必须与静态链入 libcutie.so 的 ORT 核心同源（同一份 vcpkg 构建），
+# 因此默认从 vcpkg 的库目录取。这里提前校验，避免构建到最后才失败。
+PROVIDER_CUDA="libonnxruntime_providers_cuda.so"
 
-    # 已解包且关键文件齐全则直接复用
-    if [[ -f "${extract_dir}/lib/libonnxruntime_providers_cuda.so" ]]; then
-        info "复用已解包的 ONNX Runtime: ${extract_dir}"
-        ORT_ROOT="${extract_dir}"
-        return 0
-    fi
+if [[ -z "${PROVIDER_DIR}" ]]; then
+    PROVIDER_DIR="${VCPKG_ROOT}/installed/x64-linux/lib"
+fi
+PROVIDER_DIR="$(cd "${PROVIDER_DIR}" && pwd)" \
+    || die "provider 目录不存在: ${PROVIDER_DIR}"
 
-    mkdir -p "${ORT_CACHE_DIR}"
+[[ -f "${PROVIDER_DIR}/${PROVIDER_CUDA}" ]] || die "在 ${PROVIDER_DIR} 中未找到 ${PROVIDER_CUDA}。
+wheel 缺少它将无法推理。请确认 vcpkg 安装的 onnxruntime 带 CUDA 支持，
+或用 --provider-dir 指定其所在目录。"
 
-    if [[ ! -f "${tarball_path}" ]]; then
-        local url="${ORT_BASE_URL}/v${ORT_VERSION}/${tarball_name}"
-        info "下载 ONNX Runtime GPU ${ORT_VERSION} (约 230 MB)..."
-        # --continue-at - 支持断点续传，避免大文件重下
-        curl -fL --retry 3 --continue-at - -o "${tarball_path}.part" "${url}" \
-            || die "下载失败: ${url}"
-        mv "${tarball_path}.part" "${tarball_path}"
-    else
-        info "复用已下载的压缩包: ${tarball_path}"
-    fi
+PROVIDER_SIZE="$(du -h "${PROVIDER_DIR}/${PROVIDER_CUDA}" | cut -f1)"
+info "ONNXRuntime CUDA provider: ${PROVIDER_DIR} (${PROVIDER_SIZE})"
 
-    info "解包到 ${ORT_CACHE_DIR}"
-    tar xzf "${tarball_path}" -C "${ORT_CACHE_DIR}" || die "解包失败: ${tarball_path}"
+# provider 的 CUDA 架构决定 wheel 能跑在哪些显卡上——它与 libcutie.so 的架构
+# 是两套独立的编译产物，只有两者都覆盖目标架构才能真正跑起来。
+if command -v cuobjdump >/dev/null 2>&1 || [[ -x "${NVCC%/nvcc}/cuobjdump" ]]; then
+    CUOBJDUMP="$(command -v cuobjdump || echo "${NVCC%/nvcc}/cuobjdump")"
+    PROVIDER_ARCHS="$("${CUOBJDUMP}" --list-elf "${PROVIDER_DIR}/${PROVIDER_CUDA}" 2>/dev/null \
+        | grep -oE 'sm_[0-9]+' | sort -u | tr '\n' ' ')"
+    [[ -n "${PROVIDER_ARCHS}" ]] && info "provider 支持的架构: ${PROVIDER_ARCHS}"
 
-    [[ -f "${extract_dir}/lib/libonnxruntime_providers_cuda.so" ]] \
-        || die "解包后未找到 CUDA provider，压缩包可能损坏: ${tarball_path}
-可删除该文件后重新运行本脚本。"
-
-    ORT_ROOT="${extract_dir}"
-}
-
-if [[ -n "${ORT_ROOT}" ]]; then
-    ORT_ROOT="$(cd "${ORT_ROOT}" && pwd)" || die "ORT 目录不存在: ${ORT_ROOT}"
-    [[ -f "${ORT_ROOT}/lib/libonnxruntime_providers_cuda.so" ]] \
-        || die "${ORT_ROOT} 中没有 libonnxruntime_providers_cuda.so。
---ort-root 应指向官方 GPU 预编译包的解包目录（含 include/ 与 lib/）。"
-    info "使用指定的 ONNX Runtime: ${ORT_ROOT}"
-else
-    prepare_onnxruntime
+    # 逐个检查请求的架构是否被 provider 覆盖
+    IFS=';' read -ra _requested <<< "${CUDA_ARCHS}"
+    for arch in "${_requested[@]}"; do
+        if [[ -n "${PROVIDER_ARCHS}" && "${PROVIDER_ARCHS}" != *"sm_${arch} "* ]]; then
+            warn "provider 不含 sm_${arch}，该架构的显卡上推理可能失败"
+        fi
+    done
 fi
 
 # ─── 5. 构建 wheel ───────────────────────────────────────────────────
@@ -202,13 +182,9 @@ mkdir -p "${OUTPUT_DIR}"
 # 通过环境变量把机器相关的路径传给 pyproject.toml，
 # 避免把绝对路径写进仓库（见 [tool.scikit-build.cmake.define]）。
 export CUTIE_VCPKG_TOOLCHAIN="${VCPKG_TOOLCHAIN}"
-export CUTIE_ORT_ROOT="${ORT_ROOT}"
+export CUTIE_ORT_PROVIDER_DIR="${PROVIDER_DIR}"
 export CUTIE_CUDA_ARCHS="${CUDA_ARCHS}"
 export CMAKE_BUILD_PARALLEL_LEVEL="${JOBS}"
-
-# 忽略 vcpkg 自带的 onnxruntime config，确保用上面准备的官方包。
-# 这是 CUTIE_PREFER_ORT_MODULE=ON 之外的第二重保险。
-export CUTIE_IGNORE_PATH="${VCPKG_ROOT}/installed/x64-linux/share/onnxruntime"
 
 info "开始构建 wheel（CUDA 架构: ${CUDA_ARCHS}，并行度: ${JOBS}）"
 info "首次构建需编译 CUDA kernel，可能耗时 10-20 分钟..."

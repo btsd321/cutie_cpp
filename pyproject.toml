@@ -65,17 +65,11 @@ BUILD_EXAMPLES = "OFF"
 DOWNLOAD_MODELS = "OFF"
 EXPORT_ONNX = "OFF"
 
-# 强制使用官方预编译的 ONNX Runtime GPU 包（动态库），而非 vcpkg 的静态库。
-# 静态 ORT 核心 + 外部 provider 插件会让进程里出现两个 ORT 实例并段错误，
-# 详见 CMakeLists.txt 中 CUTIE_PREFER_ORT_MODULE 处的说明。
-CUTIE_PREFER_ORT_MODULE = "ON"
-
 # 以下路径因机器而异，统一由 scripts/build_python.sh 通过环境变量注入，
 # 不把绝对路径写进仓库。直接调 pip/build 时需自行 export 这些变量。
-ONNXRUNTIME_ROOT = { env = "CUTIE_ORT_ROOT", default = "" }
 CMAKE_TOOLCHAIN_FILE = { env = "CUTIE_VCPKG_TOOLCHAIN", default = "" }
-# 屏蔽 vcpkg 自带的 onnxruntime config，避免它抢在官方包之前被找到
-CMAKE_IGNORE_PATH = { env = "CUTIE_IGNORE_PATH", default = "" }
+# ONNXRuntime CUDA provider 插件所在目录（留空则从 vcpkg 自动推导）
+CUTIE_ORT_PROVIDER_DIR = { env = "CUTIE_ORT_PROVIDER_DIR", default = "" }
 
 # 目标 GPU 架构：默认 Ada Lovelace(89, RTX 40 系) 与 Blackwell(120, RTX 50 系)。
 # sm_120 需要 CUDA >= 12.8。每增加一个架构都会明显拉长编译时间并增大体积。

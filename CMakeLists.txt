@@ -65,8 +65,6 @@ message(STATUS "CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 option(ENABLE_ONNXRUNTIME "Build with ONNXRuntime backend" ON)
 option(ENABLE_TENSORRT    "Build with TensorRT backend"    OFF)
 option(ENABLE_PYTHON      "Build Python bindings (cutie_cpp._core)" OFF)
-option(CUTIE_PREFER_ORT_MODULE
-    "跳过 onnxruntime config 模式，强制用 ONNXRUNTIME_ROOT 指定的官方预编译包" OFF)
 option(BUILD_EXAMPLES     "Build example programs"          ON)
 option(DOWNLOAD_MODELS    "Download .pth model weights at build time" ON)
 option(EXPORT_ONNX        "Auto-export ONNX submodules at build time if missing" OFF)
@@ -130,20 +128,11 @@ endif()
 
 # === 条件依赖 ===
 if(ENABLE_ONNXRUNTIME)
-    # CUTIE_PREFER_ORT_MODULE=ON 时跳过 config 模式，强制走 FindONNXRuntime.cmake
-    # 使用 ONNXRUNTIME_ROOT 指定的官方预编译包。
+    # vcpkg 的 onnxruntime 是**静态**库，ORT 核心会被链入 libcutie.so。
+    # 其 CUDA provider 插件（运行时 dlopen）必须来自**同一份** vcpkg 构建，
+    # 否则进程里会出现两个 ORT 实例，provider bridge 失效并段错误。
+    # Python wheel 因此也打包 vcpkg 的 provider，见下方 SKBUILD 分支。
     #
-    # 两种 ORT 来源不可混用：
-    # - vcpkg（config 模式）提供**静态**库，ORT 核心被链入 libcutie.so。
-    #   此时其 CUDA provider 插件（运行时 dlopen）必须来自同一份 vcpkg 构建，
-    #   否则进程里出现两个 ORT 实例，provider bridge 失效并段错误。
-    # - 官方预编译包（module 模式）提供**动态** libonnxruntime.so，
-    #   provider 能正常 bridge，且体积小得多（provider 351 MB vs vcpkg 919 MB），
-    #   因此 Python wheel 构建走这条路。见 scripts/build_python.sh。
-    if(CUTIE_PREFER_ORT_MODULE)
-        message(STATUS "ONNXRuntime: 强制 module 模式 (ONNXRUNTIME_ROOT=${ONNXRUNTIME_ROOT})")
-        find_package(ONNXRuntime REQUIRED)
-    else()
     # 优先尝试 config 模式（vcpkg 或标准安装提供 onnxruntimeConfig.cmake）
     find_package(onnxruntime CONFIG QUIET)
     if(onnxruntime_FOUND)
@@ -170,7 +159,6 @@ if(ENABLE_ONNXRUNTIME)
         # 回退：自定义 FindONNXRuntime.cmake 查找单体 libonnxruntime.so（非 vcpkg 环境）
         find_package(ONNXRuntime REQUIRED)
     endif()
-    endif()  # CUTIE_PREFER_ORT_MODULE
 endif()
 
 if(ENABLE_TENSORRT)
@@ -388,44 +376,46 @@ if(ENABLE_PYTHON)
         install(TARGETS _core LIBRARY DESTINATION cutie_cpp)
         install(TARGETS cutie LIBRARY DESTINATION cutie_cpp)
 
-        # ONNXRuntime 运行时库：核心 + provider 插件。
-        # provider 是 ORT 在建 CUDA session 时 dlopen 的，不是链接期依赖，
-        # 因此必须显式随包安装，否则 wheel 装好后推理会报
+        # ONNXRuntime 的 CUDA execution provider 插件。
+        #
+        # ORT 核心已静态链入 libcutie.so，但 provider 是运行时 dlopen 的插件，
+        # 不是链接期依赖，必须显式随包安装，否则 wheel 装好后推理会报
         # "Failed to load library libonnxruntime_providers_cuda.so"。
-        if(CUTIE_PREFER_ORT_MODULE)
-            get_filename_component(_ort_lib_dir "${ONNXRuntime_LIBRARY}" DIRECTORY)
+        #
+        # 必须用**与静态核心同一份 vcpkg 构建**的 provider：混用其它来源
+        # （如 pip 的 onnxruntime-gpu）会让进程里出现两个 ORT 实例并段错误。
+        set(CUTIE_ORT_PROVIDER_DIR "" CACHE STRING
+            "含 libonnxruntime_providers_*.so 的目录（留空则从 vcpkg 自动推导）")
 
-            # libcutie.so 的 NEEDED 是 libonnxruntime.so.1（soname），
-            # 官方包里它是指向 libonnxruntime.so.1.23.2 的符号链接。
-            # install(FILES) 不支持 FOLLOW_SYMLINK_CHAIN，因此这里读出真实文件，
-            # 再以 soname 为名安装，避免 wheel 里出现断链。
-            set(_ort_runtime_libs "")
-            foreach(_lib
-                "libonnxruntime_providers_shared.so"
-                "libonnxruntime_providers_cuda.so")
-                if(EXISTS "${_ort_lib_dir}/${_lib}")
-                    list(APPEND _ort_runtime_libs "${_ort_lib_dir}/${_lib}")
-                endif()
-            endforeach()
-
-            if(NOT _ort_runtime_libs)
-                message(FATAL_ERROR
-                    "在 ${_ort_lib_dir} 中未找到 ONNXRuntime CUDA provider。"
-                    "请确认 ONNXRUNTIME_ROOT 指向官方 GPU 预编译包的解包目录。")
+        set(_ort_provider_dir "${CUTIE_ORT_PROVIDER_DIR}")
+        if(NOT _ort_provider_dir)
+            # vcpkg 的 provider 与其它库同在 <triplet>/lib 下，
+            # 由 onnxruntime_DIR（<triplet>/share/onnxruntime）向上两级推导。
+            if(onnxruntime_DIR)
+                get_filename_component(_vcpkg_triplet "${onnxruntime_DIR}/../.." ABSOLUTE)
+                set(_ort_provider_dir "${_vcpkg_triplet}/lib")
             endif()
-
-            install(FILES ${_ort_runtime_libs} DESTINATION cutie_cpp)
-
-            # 解析 soname 链接到真实文件，按 soname 命名安装
-            set(_ort_soname "libonnxruntime.so.1")
-            get_filename_component(_ort_real "${_ort_lib_dir}/${_ort_soname}" REALPATH)
-            if(NOT EXISTS "${_ort_real}")
-                message(FATAL_ERROR "未找到 ${_ort_lib_dir}/${_ort_soname}")
-            endif()
-            install(FILES "${_ort_real}" DESTINATION cutie_cpp RENAME "${_ort_soname}")
-
-            message(STATUS "Wheel 将打包 ONNXRuntime 运行时库: ${_ort_lib_dir}")
         endif()
+
+        set(_ort_provider_libs "")
+        foreach(_lib
+            "libonnxruntime_providers_shared.so"
+            "libonnxruntime_providers_cuda.so")
+            if(EXISTS "${_ort_provider_dir}/${_lib}")
+                list(APPEND _ort_provider_libs "${_ort_provider_dir}/${_lib}")
+            endif()
+        endforeach()
+
+        if(NOT _ort_provider_libs)
+            message(FATAL_ERROR
+                "未找到 ONNXRuntime CUDA provider 插件"
+                "（查找目录: ${_ort_provider_dir}）。\n"
+                "wheel 缺少它将无法推理。请用 -DCUTIE_ORT_PROVIDER_DIR=<dir> 指定"
+                "含 libonnxruntime_providers_cuda.so 的目录。")
+        endif()
+
+        install(FILES ${_ort_provider_libs} DESTINATION cutie_cpp)
+        message(STATUS "Wheel 将打包 ONNXRuntime provider: ${_ort_provider_dir}")
     else()
         # 开发构建：扩展模块就地输出到源码包目录 python/cutie_cpp/，
         # 这样 PYTHONPATH=python 即可 import，无需 pip install 或软链接。

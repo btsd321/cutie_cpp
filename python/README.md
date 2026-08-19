@@ -22,10 +22,9 @@ bash scripts/build_python.sh --vcpkg-root /path/to/vcpkg
 pip install dist/cutie_cpp-*.whl
 ```
 
-`scripts/build_python.sh` 是 Python 专用的构建链，独立于 C++ 的 `build.sh`。
-它会自动准备 `.venv` 依赖、下载官方 ONNX Runtime GPU 包，产出**自包含**的 wheel：
-`libcutie.so`、ONNX Runtime 及其 CUDA provider 都打包在内，安装后无需设置
-`LD_LIBRARY_PATH`。
+`scripts/build_python.sh` 是 Python 专用的构建链，与 C++ 的 `build.sh` 共用同一套
+vcpkg 依赖。它会自动准备 `.venv` 依赖并产出**自包含**的 wheel：`libcutie.so`
+与 ONNX Runtime 的 CUDA provider 都打包在内，安装后无需设置 `LD_LIBRARY_PATH`。
 
 常用选项：
 
@@ -33,19 +32,19 @@ pip install dist/cutie_cpp-*.whl
 # 只编译单个架构以缩短编译时间（默认 "89;120"）
 bash scripts/build_python.sh --vcpkg-root /path/to/vcpkg --cuda-archs "89"
 
-# 复用已下载的 ONNX Runtime，跳过下载
-bash scripts/build_python.sh --vcpkg-root /path/to/vcpkg --ort-root /path/to/ort
+# provider 不在 vcpkg 默认位置时显式指定
+bash scripts/build_python.sh --vcpkg-root /path/to/vcpkg --provider-dir /path/to/lib
 
 bash scripts/build_python.sh --help   # 全部选项
 ```
 
-首次构建需下载 230 MB 并编译 CUDA kernel，约 10-20 分钟。
+首次构建需编译 CUDA kernel，约 10-20 分钟。
 构建目录固定为 `build/skbuild`，增量重建很快。
 
 ### 方式二：CMake 构建后用 PYTHONPATH
 
-适合与 C++ 开发同步迭代：扩展模块会就地输出到 `python/cutie_cpp/`。
-这条路径用 vcpkg 的静态 ONNX Runtime，**不能**用来产出可分发的 wheel。
+适合与 C++ 开发同步迭代：扩展模块会就地输出到 `python/cutie_cpp/`，
+不打包运行时库，因此依赖构建目录里的 `libcutie.so`。
 
 ```bash
 bash build.sh --enable-python --vcpkg-root ./vcpkg/
@@ -61,14 +60,20 @@ python -m cutie_cpp
 
 会打印随包库清单、CUDA/cuDNN 依赖解析结果和模型目录，便于快速定位问题。
 
-### 为什么 Python 与 C++ 用不同的 ONNX Runtime
+### 关于 wheel 体积
 
-C++ 构建用 vcpkg 的**静态** ORT，核心库被链入 `libcutie.so`。但 ORT 的 CUDA
-provider 是运行时 `dlopen` 的插件，静态核心加外部 provider 会让进程里出现两个
-ORT 实例，直接段错误。所以 wheel 改用官方预编译包的**动态** `libonnxruntime.so`，
-provider 得以正常工作，且体积小得多（provider 351 MB vs vcpkg 的 919 MB）。
+wheel 约 700 MB，主要由两部分构成：
 
-两者数值结果一致，已通过同帧前景面积比对验证。
+| 文件 | 体积 | 说明 |
+|---|---|---|
+| `libonnxruntime_providers_cuda.so` | 919 MB | ORT 的 CUDA 算子，覆盖多个 GPU 架构 |
+| `libcutie.so` | 234 MB | 推理库，含静态链入的 OpenCV |
+
+provider 必须随包分发：ORT 核心已静态链入 `libcutie.so`，但 provider 是运行时
+`dlopen` 的插件，且**必须与核心同源**。用 pip 的 `onnxruntime-gpu` 替代会让进程里
+出现两个 ORT 实例，直接段错误。
+
+CUDA 运行时（约 800 MB）与 cuDNN（约 600 MB）不打包，需用户自备。
 
 ## 快速上手
 
