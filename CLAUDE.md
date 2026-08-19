@@ -41,20 +41,37 @@ bash install.sh
 # 或：cmake --install build/
 ```
 
-Python 库的安装与测试：
+Python 库有**独立的构建链** `scripts/build_python.sh`，与上面的 `build.sh` 分工不同：
 
 ```bash
-# 安装为 wheel（scikit-build-core 驱动，自动编译 C++ 扩展）
-.venv/bin/pip install .
+# 产出自包含 wheel（推荐；自动准备 .venv 依赖 + 下载官方 ONNX Runtime）
+bash scripts/build_python.sh --vcpkg-root /path/to/vcpkg
+.venv/bin/pip install dist/cutie_cpp-*.whl
 
-# 开发模式：CMake 构建 + PYTHONPATH
+# 只编译单架构以缩短耗时（默认 "89;120"）
+bash scripts/build_python.sh --vcpkg-root /path/to/vcpkg --cuda-archs "89"
+
+# 开发模式：CMake 就地构建 + PYTHONPATH（不能用于产出可分发 wheel）
 bash build.sh --enable-python --vcpkg-root ./vcpkg/
 PYTHONPATH=python .venv/bin/python -c "import cutie_cpp"
+
+# 安装诊断（打印随包库、CUDA/cuDNN 解析结果、模型目录）
+.venv/bin/python -m cutie_cpp
 
 # 测试（gpu 标记的用例需要 GPU 与真实模型）
 .venv/bin/python -m pytest -m "not gpu"
 .venv/bin/python -m pytest -m gpu
 ```
+
+**两条构建链的 ONNX Runtime 不同，且不可混用**：
+- `build.sh`（C++）用 vcpkg 的**静态** ORT，核心库链入 `libcutie.so`
+- `scripts/build_python.sh` 用官方预编译包的**动态** `libonnxruntime.so`
+
+原因：ORT 的 CUDA provider 是运行时 `dlopen` 的插件，必须与其核心库严格配套。
+静态核心 + 外部 provider 会让进程里出现两个 ORT 实例并**段错误**。
+所以 wheel 必须走动态链接路径（由 CMake 选项 `CUTIE_PREFER_ORT_MODULE=ON` 控制），
+provider 也随包分发。官方包的 provider 还小得多（351 MB vs vcpkg 的 919 MB）。
+CUDA 运行时与 cuDNN 体积过大（各约 800/600 MB），不打包，由 `_loader.py` 提示安装。
 
 构建产物默认输出到 `build/` 目录：`build/libcutie.so`、`build/demo_basic`。
 

@@ -18,8 +18,15 @@ def _print_extension_status():
     package_dir = Path(__file__).resolve().parent
     print(f"包目录: {package_dir}")
 
-    shared_objects = sorted(p.name for p in package_dir.glob("*.so"))
-    print(f"随包二进制: {shared_objects or '(无)'}")
+    from cutie_cpp._loader import bundled_libraries
+
+    print("随包运行时库:")
+    libraries = bundled_libraries()
+    if not libraries:
+        print("  (无)")
+    for name in libraries:
+        size_mb = (package_dir / name).stat().st_size / 1048576
+        print(f"  {size_mb:8.1f} MB  {name}")
 
     try:
         from cutie_cpp._loader import load_core
@@ -32,25 +39,30 @@ def _print_extension_status():
         return False
 
 
-def _print_cuda_status():
-    """打印 CUDA 依赖库的解析结果。"""
-    from cutie_cpp._loader import cuda_library_status
+def _print_dependency_status():
+    """打印外部依赖库（CUDA、cuDNN）的解析结果。
 
-    print("\nCUDA 依赖库:")
-    for name, path in cuda_library_status().items():
-        print(f"  {name:<14} {path or '未找到'}")
+    Returns:
+        bool: 全部依赖齐全时为 True。
+    """
+    from cutie_cpp._loader import library_status
 
+    all_found = True
+    for group, libraries in library_status().items():
+        missing = [name for name, path in libraries.items() if path is None]
+        status = "齐全" if not missing else f"缺少 {len(missing)} 个"
+        print(f"\n{group} 依赖 ({status}):")
+        for name, path in libraries.items():
+            print(f"  {name:<36} {path or '未找到'}")
 
-def _print_provider_status():
-    """打印 ONNX Runtime CUDA provider 插件的定位结果。"""
-    from cutie_cpp._loader import find_provider_dir
+        if missing:
+            all_found = False
+            if group == "cuDNN":
+                print("  → pip install nvidia-cudnn-cu12")
+            else:
+                print("  → 安装 CUDA Toolkit >= 11.8，或 pip install nvidia-cuda-runtime-cu12")
 
-    print("\nONNX Runtime CUDA provider:")
-    provider_dir = find_provider_dir()
-    if provider_dir is None:
-        print("  未找到，请安装: pip install onnxruntime-gpu")
-    else:
-        print(f"  {provider_dir}")
+    return all_found
 
 
 def _print_model_status():
@@ -76,13 +88,16 @@ def main():
     """
     print(f"Python: {sys.version.split()[0]} ({sys.executable})")
 
-    if not _print_extension_status():
-        _print_cuda_status()
+    extension_ok = _print_extension_status()
+    dependencies_ok = _print_dependency_status()
+
+    if not extension_ok:
         return 1
 
-    _print_cuda_status()
-    _print_provider_status()
     _print_model_status()
+
+    if not dependencies_ok:
+        print("\n注意: 部分外部依赖未找到，推理时可能失败。")
     return 0
 
 

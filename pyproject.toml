@@ -59,18 +59,27 @@ sdist.exclude = [
 [tool.scikit-build.cmake.define]
 ENABLE_PYTHON = "ON"
 ENABLE_ONNXRUNTIME = "ON"
-# vcpkg 工具链：从 CUTIE_VCPKG_ROOT 环境变量取，未设置时为空（走系统查找）。
-# 用法：CUTIE_VCPKG_ROOT=/path/to/vcpkg pip wheel .
-CMAKE_TOOLCHAIN_FILE = { env = "CUTIE_VCPKG_TOOLCHAIN", default = "" }
 # 以下在 wheel 构建中都不需要：示例是 C++ 可执行文件，
 # 模型权重体积大且应由用户按需下载。
 BUILD_EXAMPLES = "OFF"
 DOWNLOAD_MODELS = "OFF"
 EXPORT_ONNX = "OFF"
-# 目标 GPU 架构：Ada Lovelace(89, RTX 40 系) 与 Blackwell(120, RTX 50 系)。
-# sm_120 需要 CUDA >= 12.8。要覆盖更多架构可改为 "75;80;86;89;90;120"，
-# 但每个架构都会显著增加编译时间与二进制体积。
-CUTIE_CUDA_ARCHS = "89;120"
+
+# 强制使用官方预编译的 ONNX Runtime GPU 包（动态库），而非 vcpkg 的静态库。
+# 静态 ORT 核心 + 外部 provider 插件会让进程里出现两个 ORT 实例并段错误，
+# 详见 CMakeLists.txt 中 CUTIE_PREFER_ORT_MODULE 处的说明。
+CUTIE_PREFER_ORT_MODULE = "ON"
+
+# 以下路径因机器而异，统一由 scripts/build_python.sh 通过环境变量注入，
+# 不把绝对路径写进仓库。直接调 pip/build 时需自行 export 这些变量。
+ONNXRUNTIME_ROOT = { env = "CUTIE_ORT_ROOT", default = "" }
+CMAKE_TOOLCHAIN_FILE = { env = "CUTIE_VCPKG_TOOLCHAIN", default = "" }
+# 屏蔽 vcpkg 自带的 onnxruntime config，避免它抢在官方包之前被找到
+CMAKE_IGNORE_PATH = { env = "CUTIE_IGNORE_PATH", default = "" }
+
+# 目标 GPU 架构：默认 Ada Lovelace(89, RTX 40 系) 与 Blackwell(120, RTX 50 系)。
+# sm_120 需要 CUDA >= 12.8。每增加一个架构都会明显拉长编译时间并增大体积。
+CUTIE_CUDA_ARCHS = { env = "CUTIE_CUDA_ARCHS", default = "89;120" }
 
 # ─── 测试配置 ────────────────────────────────────────────────────────
 

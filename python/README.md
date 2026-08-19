@@ -15,30 +15,60 @@ Cutie 视频目标分割（VOS）C++ 推理库的 Python 封装。用 numpy 数�
 
 ## 安装
 
-### 方式一：pip install（推荐）
+### 方式一：构建 wheel（推荐）
 
 ```bash
-pip install .
+bash scripts/build_python.sh --vcpkg-root /path/to/vcpkg
+pip install dist/cutie_cpp-*.whl
 ```
 
-首次构建需编译 CUDA kernel（覆盖 sm_75~90 五个架构），可能耗时十分钟以上。
-构建目录固定为 `build/skbuild`，后续增量重建很快。
+`scripts/build_python.sh` 是 Python 专用的构建链，独立于 C++ 的 `build.sh`。
+它会自动准备 `.venv` 依赖、下载官方 ONNX Runtime GPU 包，产出**自包含**的 wheel：
+`libcutie.so`、ONNX Runtime 及其 CUDA provider 都打包在内，安装后无需设置
+`LD_LIBRARY_PATH`。
 
-依赖路径非标准时通过 `-C` 传给 CMake：
+常用选项：
 
 ```bash
-pip install . -C cmake.define.CMAKE_PREFIX_PATH=/path/to/vcpkg/installed/x64-linux
+# 只编译单个架构以缩短编译时间（默认 "89;120"）
+bash scripts/build_python.sh --vcpkg-root /path/to/vcpkg --cuda-archs "89"
+
+# 复用已下载的 ONNX Runtime，跳过下载
+bash scripts/build_python.sh --vcpkg-root /path/to/vcpkg --ort-root /path/to/ort
+
+bash scripts/build_python.sh --help   # 全部选项
 ```
+
+首次构建需下载 230 MB 并编译 CUDA kernel，约 10-20 分钟。
+构建目录固定为 `build/skbuild`，增量重建很快。
 
 ### 方式二：CMake 构建后用 PYTHONPATH
 
 适合与 C++ 开发同步迭代：扩展模块会就地输出到 `python/cutie_cpp/`。
+这条路径用 vcpkg 的静态 ONNX Runtime，**不能**用来产出可分发的 wheel。
 
 ```bash
 bash build.sh --enable-python --vcpkg-root ./vcpkg/
 export PYTHONPATH=$PWD/python
 python -c "import cutie_cpp; print(cutie_cpp.__version__)"
 ```
+
+### 安装后自检
+
+```bash
+python -m cutie_cpp
+```
+
+会打印随包库清单、CUDA/cuDNN 依赖解析结果和模型目录，便于快速定位问题。
+
+### 为什么 Python 与 C++ 用不同的 ONNX Runtime
+
+C++ 构建用 vcpkg 的**静态** ORT，核心库被链入 `libcutie.so`。但 ORT 的 CUDA
+provider 是运行时 `dlopen` 的插件，静态核心加外部 provider 会让进程里出现两个
+ORT 实例，直接段错误。所以 wheel 改用官方预编译包的**动态** `libonnxruntime.so`，
+provider 得以正常工作，且体积小得多（provider 351 MB vs vcpkg 的 919 MB）。
+
+两者数值结果一致，已通过同帧前景面积比对验证。
 
 ## 快速上手
 
