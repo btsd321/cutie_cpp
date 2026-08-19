@@ -378,61 +378,68 @@ if(ENABLE_PYTHON)
 endif()
 
 # === 安装 ===
-include(GNUInstallDirs)
+# wheel 构建（SKBUILD）只安装 Python 包本身，跳过 C++ 开发文件：
+# 头文件、CMake 导出配置、.pth 权重都不属于 Python 轮子，
+# 否则 wheel 会膨胀到近 1 GB（权重约 786 MB）。
+if(NOT SKBUILD)
 
-install(TARGETS cutie
-    EXPORT cutieTargets
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
+    include(GNUInstallDirs)
 
-install(DIRECTORY include/cutie
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    FILES_MATCHING PATTERN "*.h"
-)
+    install(TARGETS cutie
+        EXPORT cutieTargets
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
 
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/include/cutie/config.h"
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cutie
-)
+    install(DIRECTORY include/cutie
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.h"
+    )
 
-install(EXPORT cutieTargets
-    FILE cutieTargets.cmake
-    NAMESPACE cutie::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cutie
-)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/include/cutie/config.h"
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cutie
+    )
 
-# === CMake 包配置文件生成 ===
-include(CMakePackageConfigHelpers)
+    install(EXPORT cutieTargets
+        FILE cutieTargets.cmake
+        NAMESPACE cutie::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cutie
+    )
 
-configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cutieConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/cutieConfig.cmake"
-    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/cutie"
-)
+    # === CMake 包配置文件生成 ===
+    include(CMakePackageConfigHelpers)
 
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/cutieConfigVersion.cmake"
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cutieConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/cutieConfig.cmake"
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/cutie"
+    )
 
-install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/cutieConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/cutieConfigVersion.cmake"
-    # Find 模块与 cutieConfig.cmake 同目录安装，供 find_dependency 回退使用
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindTensorRT.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindONNXRuntime.cmake"
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/cutie"
-)
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/cutieConfigVersion.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+    )
 
-# === 模型文件安装（.pth 权重 + 任意已导出的 .onnx/.engine 文件）===
-# OPTIONAL: 若 share/model/ 为空或不存在也不报错
-install(DIRECTORY "${CUTIE_MODEL_SOURCE_DIR}/"
-    DESTINATION "share/cutie_cpp/model"
-    OPTIONAL
-    FILES_MATCHING
-        PATTERN "*.pth"
-        PATTERN "*.onnx"
-        PATTERN "*.engine"
-)
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/cutieConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/cutieConfigVersion.cmake"
+        # Find 模块与 cutieConfig.cmake 同目录安装，供 find_dependency 回退使用
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindTensorRT.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindONNXRuntime.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/cutie"
+    )
+
+    # === 模型文件安装（.pth 权重 + 任意已导出的 .onnx/.engine 文件）===
+    # OPTIONAL: 若 share/model/ 为空或不存在也不报错
+    install(DIRECTORY "${CUTIE_MODEL_SOURCE_DIR}/"
+        DESTINATION "share/cutie_cpp/model"
+        OPTIONAL
+        FILES_MATCHING
+            PATTERN "*.pth"
+            PATTERN "*.onnx"
+            PATTERN "*.engine"
+    )
+
+endif()  # NOT SKBUILD
