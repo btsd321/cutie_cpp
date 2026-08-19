@@ -41,6 +41,18 @@ def _print_cuda_status():
         print(f"  {name:<14} {path or '未找到'}")
 
 
+def _print_provider_status():
+    """打印 ONNX Runtime CUDA provider 插件的定位结果。"""
+    from cutie_cpp._loader import find_provider_dir
+
+    print("\nONNX Runtime CUDA provider:")
+    provider_dir = find_provider_dir()
+    if provider_dir is None:
+        print("  未找到，请安装: pip install onnxruntime-gpu")
+    else:
+        print(f"  {provider_dir}")
+
+
 def _print_model_status():
     """打印模型目录的搜索结果。"""
     from cutie_cpp.exceptions import ModelNotFoundError
@@ -69,6 +81,7 @@ def main():
         return 1
 
     _print_cuda_status()
+    _print_provider_status()
     _print_model_status()
     return 0
 

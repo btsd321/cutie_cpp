@@ -16,6 +16,7 @@ VideoSegmenter 封装 C++ CutieProcessor，负责：
 import numpy as np
 
 from cutie_cpp import _core
+from cutie_cpp._loader import provider_help
 from cutie_cpp.config import CutieConfig, Device
 from cutie_cpp.exceptions import ConfigError, InferenceError
 from cutie_cpp.model_zoo import find_model_prefix, resolve_model_dir
@@ -157,7 +158,10 @@ class VideoSegmenter:
         except RuntimeError as exc:
             # C++ 侧 std::runtime_error 会被 pybind11 转成 RuntimeError，
             # 这里统一包装成本库的异常类型。
-            raise InferenceError(f"加载模型失败: {exc}") from exc
+            #
+            # CUDA provider 插件是 ORT 在建 session 时才 dlopen 的，所以缺失它
+            # 表现为构造期失败而非导入失败，需在此附上安装提示。
+            raise InferenceError(f"加载模型失败: {exc}{provider_help(exc)}") from exc
 
         # 复用同一个 options 对象，避免逐帧构造
         self._options = _core.NativeStepOptions()

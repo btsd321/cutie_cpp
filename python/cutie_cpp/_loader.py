@@ -25,6 +25,29 @@ _CUDA_LIBS = {
     "libnvrtc": "NVRTC",
 }
 
+# ONNX Runtime 的 CUDA execution provider 插件文件名。
+# 这两个库由 ORT 在创建 CUDA session 时 dlopen，不是链接期依赖。
+_PROVIDER_SHARED = "libonnxruntime_providers_shared.so"
+_PROVIDER_CUDA = "libonnxruntime_providers_cuda.so"
+
+_PROVIDER_HINT = """
+未找到 ONNX Runtime 的 CUDA execution provider 插件
+（libonnxruntime_providers_cuda.so / libonnxruntime_providers_shared.so）。
+
+ONNX Runtime 的核心库已静态链入 libcutie.so，但 CUDA provider 是运行时
+按需 dlopen 的插件，体积约 900 MB 且额外依赖 cuDNN 9，因此不随 wheel 分发。
+
+安装方式：
+
+    pip install onnxruntime-gpu
+
+它会同时提供 provider 插件与配套的 cuDNN，本库会自动从其安装目录加载。
+
+若已装在非标准位置，可用环境变量指定所在目录：
+
+    export CUTIE_ORT_PROVIDER_DIR=/path/to/dir/containing/providers
+"""
+
 _INSTALL_HINT = """
 cutie_cpp 需要 CUDA 运行时库，但未在系统中找到{detail}。
 
@@ -101,8 +124,80 @@ def _add_pip_cuda_paths():
     return loaded_dirs
 
 
+def find_provider_dir():
+    """定位 ONNX Runtime 的 CUDA provider 插件目录。
+
+    搜索顺序：
+        1. CUTIE_ORT_PROVIDER_DIR 环境变量
+        2. pip 安装的 onnxruntime / onnxruntime-gpu 包的 capi 目录
+        3. 已在 LD_LIBRARY_PATH 中（返回 None，交由动态链接器处理）
+
+    Returns:
+        pathlib.Path | None: provider 插件所在目录；找不到时为 None。
+    """
+    env_dir = os.environ.get("CUTIE_ORT_PROVIDER_DIR")
+    if env_dir and (Path(env_dir) / _PROVIDER_SHARED).is_file():
+        return Path(env_dir)
+
+    # onnxruntime-gpu 把插件放在 <site-packages>/onnxruntime/capi/
+    try:
+        import onnxruntime
+
+        capi_dir = Path(onnxruntime.__file__).resolve().parent / "capi"
+        if (capi_dir / _PROVIDER_SHARED).is_file():
+            return capi_dir
+    except ImportError:
+        pass
+
+    return None
+
+
+def _prepare_ort_providers():
+    """让 ONNX Runtime 能找到 CUDA provider 插件。
+
+    ONNX Runtime 用 dlopen 按需加载 provider，其查找依赖动态链接器的搜索路径。
+    这里把 provider 目录加入 LD_LIBRARY_PATH，并预加载 providers_shared，
+    使后续 dlopen 能直接命中。
+
+    Note:
+        LD_LIBRARY_PATH 的修改对当前进程的后续 dlopen 生效有限（glibc 在启动时
+        缓存该变量），因此关键手段是 RTLD_GLOBAL 预加载，让符号提前进入进程。
+
+    Returns:
+        pathlib.Path | None: 实际使用的 provider 目录；未找到时为 None。
+    """
+    import ctypes
+
+    provider_dir = find_provider_dir()
+    if provider_dir is None:
+        return None
+
+    # 追加到 LD_LIBRARY_PATH，供 ORT 内部按名称 dlopen 时参考
+    existing = os.environ.get("LD_LIBRARY_PATH", "")
+    if str(provider_dir) not in existing.split(os.pathsep):
+        os.environ["LD_LIBRARY_PATH"] = (
+            f"{provider_dir}{os.pathsep}{existing}" if existing else str(provider_dir)
+        )
+
+    # 用绝对路径 RTLD_GLOBAL 预加载，使 ORT 后续按 soname dlopen 时复用已加载实例
+    for lib_name in (_PROVIDER_SHARED, _PROVIDER_CUDA):
+        lib_path = provider_dir / lib_name
+        if not lib_path.is_file():
+            continue
+        try:
+            ctypes.CDLL(str(lib_path), mode=ctypes.RTLD_GLOBAL)
+        except OSError:
+            # 常见原因是缺 cuDNN；此处不报错，留给 ORT 给出更具体的信息
+            continue
+
+    return provider_dir
+
+
 def load_core():
     """导入 C++ 扩展模块，失败时给出可操作的诊断信息。
+
+    导入前会先准备 ONNX Runtime 的 CUDA provider 插件路径
+    （见 _prepare_ort_providers），使 wheel 安装的场景无需手动设 LD_LIBRARY_PATH。
 
     Returns:
         module: cutie_cpp._core 扩展模块。
@@ -110,6 +205,8 @@ def load_core():
     Raises:
         ImportError: 扩展模块加载失败。消息中包含缺失的库名与安装建议。
     """
+    _prepare_ort_providers()
+
     try:
         from cutie_cpp import _core
 
@@ -142,6 +239,32 @@ def load_core():
             "若从源码构建，请确认已用 -DENABLE_PYTHON=ON 编译，"
             "且 libcutie.so 与 _core*.so 位于同一目录。"
         ) from exc
+
+
+def provider_help(error):
+    """针对 provider 相关的错误，返回附加的安装提示。
+
+    ONNX Runtime 在创建 CUDA session 时才 dlopen provider 插件，因此缺失它
+    表现为处理器构造失败。此函数识别该情形并给出安装指引。
+
+    Args:
+        error (Exception | str): 捕获到的错误或其消息。
+
+    Returns:
+        str: 需要提示时返回以换行开头的提示文本；否则返回空字符串。
+    """
+    message = str(error)
+    if "providers_shared" not in message and "providers_cuda" not in message:
+        return ""
+
+    provider_dir = find_provider_dir()
+    if provider_dir is not None:
+        # 目录找到了却仍失败，最常见的原因是缺 cuDNN
+        return (
+            f"\n\n已找到 provider 目录 {provider_dir}，但加载失败。"
+            "\n通常是缺少 cuDNN 9，可尝试: pip install nvidia-cudnn-cu12"
+        )
+    return "\n" + _PROVIDER_HINT
 
 
 def cuda_library_status():
