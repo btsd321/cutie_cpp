@@ -322,10 +322,11 @@ if(ENABLE_PYTHON)
         install(TARGETS _core LIBRARY DESTINATION cutie_cpp)
         install(TARGETS cutie LIBRARY DESTINATION cutie_cpp)
     else()
-        # 普通构建：输出到 build/python/cutie_cpp/，便于用 PYTHONPATH 直接试用。
+        # 开发构建：扩展模块就地输出到源码包目录 python/cutie_cpp/，
+        # 这样 PYTHONPATH=python 即可 import，无需 pip install 或软链接。
+        # BUILD_RPATH 指向 build/ 以便运行时找到 libcutie.so。
         set_target_properties(_core PROPERTIES
-            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/cutie_cpp"
-            INSTALL_RPATH "$ORIGIN;${CMAKE_BINARY_DIR}"
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/cutie_cpp"
             BUILD_RPATH "${CMAKE_BINARY_DIR}"
         )
     endif()
