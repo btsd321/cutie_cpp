@@ -345,10 +345,20 @@ class VideoSegmenter:
     def reset(self):
         """重置为可处理新视频的初始状态。
 
-        清空全部内存并把帧计数归零，模型保持加载状态，
+        清空全部内存、停止跟踪所有目标并把帧计数归零，模型保持加载状态，
         因此比重建实例快得多。
+
+        Note:
+            C++ 的 clear_memory() 只重建内存管理器，不会清空目标列表
+            （见 src/core/inference_core.cpp 的 InferenceCore::clear_memory）。
+            换视频意味着目标也要重新指定，所以这里额外删除全部目标。
         """
-        self.clear_memory()
+        self._ensure_open()
+
+        active = self._processor.active_objects()
+        if active:
+            self._processor.delete_objects(list(active))
+        self._processor.clear_memory()
         self._frame_index = 0
         logger.info("分割器已重置，可处理新视频")
 
