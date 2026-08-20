@@ -2,12 +2,69 @@
 #include <numeric>
 #include <stdexcept>
 
+#include <linden_logger/logger_interface.hpp>
+
 #include "cutie/ort/core/ort_utils.h"
+
+// ── ONNX Runtime 日志回调 ────────────────────────────────────────
+// 将 ONNX Runtime 的日志转发到 linden_logger（进程级 Env 共用此回调）。
+// 日志输出固定走 StdLogger 单例：Env 是进程级永生对象，无法绑定每个实例
+// 各自的 logger；ORT 自身的运行时日志较少，固定级别（WARNING）足够。
+namespace {
+void ORT_API_CALL ort_logging_callback(void* param, OrtLoggingLevel severity,
+                                       const char* category, const char* /*logid*/,
+                                       const char* code_location, const char* message)
+{
+    auto* logger = static_cast<linden::log::ILogger*>(param);
+    if (!logger) return;
+
+    // 将 ORT 日志级别映射到 linden_logger 级别
+    linden::log::LogLevel level;
+    switch (severity)
+    {
+        case ORT_LOGGING_LEVEL_VERBOSE:
+        case ORT_LOGGING_LEVEL_INFO:
+            level = linden::log::LogLevel::DEBUG;
+            break;
+        case ORT_LOGGING_LEVEL_WARNING:
+            level = linden::log::LogLevel::WARN;
+            break;
+        case ORT_LOGGING_LEVEL_ERROR:
+        case ORT_LOGGING_LEVEL_FATAL:
+            level = linden::log::LogLevel::ERROR;
+            break;
+        default:
+            level = linden::log::LogLevel::INFO;
+    }
+
+    // 格式化输出：[ORT][category] message (location)
+    if (code_location && code_location[0] != '\0')
+    {
+        logger->logf(level, "[ORT][{}] {} ({})", fmt::make_format_args(category, message, code_location));
+    }
+    else
+    {
+        logger->logf(level, "[ORT][{}] {}", fmt::make_format_args(category, message));
+    }
+}
+}  // namespace
 
 namespace cutie
 {
 namespace ortcore
 {
+
+Ort::Env& ort_global_env()
+{
+    // 进程级永生 Ort::Env 单例：堆分配且永不 delete，确保其析构函数永不执行。
+    // 详见头文件 ort_utils.h 中 ort_global_env() 的说明。
+    // 静态指针本身的初始化是线程安全的（C++11 函数局部 static）；析构时仅
+    // 释放指针、不释放所指向的 Env 对象，故 Env 全程不被析构、provider 不被卸载。
+    static Ort::Env* env = new Ort::Env(ORT_LOGGING_LEVEL_WARNING, "cutie",
+                                        ort_logging_callback,
+                                        linden::log::StdLogger::instance().get());
+    return *env;
+}
 
 Ort::Value create_tensor(const float* data, const std::vector<int64_t>& shape,
                          const Ort::MemoryInfo& /*memory_info*/)

@@ -238,8 +238,7 @@ private:
     struct SessionBundle;  ///< Internal session wrapper (fwd decl)
     using SessionPtr = std::unique_ptr<SessionBundle>;
 
-    std::shared_ptr<linden::log::ILogger> logger_;  ///< Logger (must be before env_)
-    Ort::Env env_;  ///< ONNX Runtime environment
+    std::shared_ptr<linden::log::ILogger> logger_;  ///< Logger（实例自身日志；ORT 日志走进程级 Env 单例）
     std::unique_ptr<ortcore::GpuMemoryAllocator> gpu_alloc_;  ///< GPU memory allocator
 
     int model_h_ = 0;  ///< Model input height

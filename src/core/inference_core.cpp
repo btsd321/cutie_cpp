@@ -77,6 +77,21 @@ struct InferenceCore::Impl
 
     explicit Impl(const CutieConfig& config, std::shared_ptr<linden::log::ILogger> logger_ptr);
 
+    /**
+     * @brief 显式析构，修正成员销毁顺序以避免 Ort::Value 的 use-after-free。
+     *
+     * Ort::Value 析构时会回调其创建分配器的 Free：GPU 自定义分配器
+     * CudaAllocatorImpl 由 network（OrtCutie）持有。network 声明在成员末尾，
+     * 默认析构按声明逆序会**最先**销毁 network，导致分配器先于
+     * memory / feature_store / last_mask / cached_image_gpu 释放；
+     * 这些成员随后析构时回调已释放分配器 → 野指针、exit 139
+     * （反复创建销毁后堆复用命中即崩）。
+     *
+     * 在析构体先清空这些 Ort::Value，此时 network 仍存活、分配器有效；
+     * 之后再由默认析构按逆序销毁 network 等成员，已无悬挂 Value。
+     */
+    ~Impl();
+
     /// GPU 推理核心路径（step 和 step_gpu 共用）。
     types::GpuCutieMask step_gpu_impl(const cv::cuda::GpuMat& gpu_image,
                                       const cv::cuda::GpuMat& gpu_mask,
@@ -143,6 +158,21 @@ InferenceCore::Impl::Impl(const CutieConfig& config,
     logger->error("InferenceCore: no backend enabled. Build with -DENABLE_ONNXRUNTIME=ON or -DENABLE_TENSORRT=ON");
     throw std::runtime_error("InferenceCore: no backend enabled.");
 #endif
+}
+
+// ── Impl destruction（修正析构顺序）─────────────────────────────────
+
+InferenceCore::Impl::~Impl()
+{
+    // 先释放所有持有 GPU Ort::Value 的成员：此时 network（及其 CudaAllocatorImpl、
+    // 以及进程级 Env / CUDA provider）仍存活，分配器有效，Ort::Value 析构回调安全。
+    // 若不干预，默认析构按声明逆序会最先销毁 network → 分配器先死 →
+    // memory/feature_store/last_mask/cached_image_gpu 随后析构回调已释放分配器 →
+    // use-after-free、exit 139（反复创建销毁后命中即崩）。
+    feature_store.clear();               // CachedFeatures: f16/f8/f4/pix_feat/key/shrinkage/selection
+    memory.reset();                      // MemoryManager: work_mem_/long_mem_/sensory_/obj_v_
+    last_mask = Ort::Value{nullptr};     // [1, num_objects, H, W]
+    cached_image_gpu = Ort::Value{nullptr};  // [1, 3, H, W]
 }
 
 // ── ensure_features ─────────────────────────────────────────────────

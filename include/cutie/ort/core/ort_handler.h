@@ -34,7 +34,8 @@ namespace ortcore
 class BasicOrtHandler
 {
 protected:
-    Ort::Env ort_env;  ///< ONNX Runtime environment
+    // ONNX Runtime 环境不再作为实例成员：改用进程级永生单例 ortcore::ort_global_env()，
+    // 避免每个 handler 各自创建/销毁 Env 导致 CUDA provider 反复卸载段错误。
     Ort::SessionOptions session_options;  ///< Session configuration
     std::unique_ptr<Ort::Session> ort_session;  ///< ONNX Runtime session
     Ort::MemoryInfo memory_info_handler =

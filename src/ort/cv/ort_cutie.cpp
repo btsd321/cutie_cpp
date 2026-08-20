@@ -18,45 +18,9 @@ namespace cutie
 namespace ortcv
 {
 
-// ── ONNX Runtime 日志回调 ────────────────────────────────────────
-// 将 ONNX Runtime 的日志输出集成到 linden_logger 系统。
-
-static void ORT_API_CALL ort_logging_callback(void* param, OrtLoggingLevel severity,
-                                               const char* category, const char* logid,
-                                               const char* code_location, const char* message)
-{
-    auto* logger = static_cast<linden::log::ILogger*>(param);
-    if (!logger) return;
-
-    // 将 ORT 日志级别映射到 linden_logger 级别
-    linden::log::LogLevel level;
-    switch (severity)
-    {
-        case ORT_LOGGING_LEVEL_VERBOSE:
-        case ORT_LOGGING_LEVEL_INFO:
-            level = linden::log::LogLevel::DEBUG;
-            break;
-        case ORT_LOGGING_LEVEL_WARNING:
-            level = linden::log::LogLevel::WARN;
-            break;
-        case ORT_LOGGING_LEVEL_ERROR:
-        case ORT_LOGGING_LEVEL_FATAL:
-            level = linden::log::LogLevel::ERROR;
-            break;
-        default:
-            level = linden::log::LogLevel::INFO;
-    }
-
-    // 格式化输出：[ORT][category] message (location)
-    if (code_location && code_location[0] != '\0')
-    {
-        logger->logf(level, "[ORT][{}] {} ({})", fmt::make_format_args(category, message, code_location));
-    }
-    else
-    {
-        logger->logf(level, "[ORT][{}] {}", fmt::make_format_args(category, message));
-    }
-}
+// ORT 日志回调与进程级 Env 单例见 ort_utils.cpp（ortcore::ort_global_env()）。
+// 每个 OrtCutie 实例不再各自创建/销毁 Env，避免反复创建销毁实例时在
+// CUDA provider 卸载阶段段错误（exit 139）。
 
 // ── Internal session wrapper ────────────────────────────────────────
 
@@ -96,24 +60,13 @@ struct OrtCutie::SessionBundle
     }
 };
 
-static OrtLoggingLevel to_ort_level(linden::log::LogLevel level)
-{
-    switch (level)
-    {
-        case linden::log::LogLevel::DEBUG: return ORT_LOGGING_LEVEL_VERBOSE;
-        case linden::log::LogLevel::INFO:  return ORT_LOGGING_LEVEL_INFO;
-        case linden::log::LogLevel::WARN:  return ORT_LOGGING_LEVEL_WARNING;
-        case linden::log::LogLevel::ERROR: return ORT_LOGGING_LEVEL_ERROR;
-        default:                           return ORT_LOGGING_LEVEL_WARNING;
-    }
-}
-
 // ── Construction / destruction ──────────────────────────────────────
 
 OrtCutie::OrtCutie(const core::CutieConfig& config, std::shared_ptr<linden::log::ILogger> logger)
-    : logger_(logger ? std::move(logger) : linden::log::StdLogger::instance()),
-      env_(to_ort_level(logger_->get_level()), "cutie", ort_logging_callback, logger_.get())
+    : logger_(logger ? std::move(logger) : linden::log::StdLogger::instance())
 {
+    // Ort::Env 不再作为成员创建：改用进程级永生单例 ortcore::ort_global_env()，
+    // 见 create_session()。销毁本对象不会析构 Env，CUDA provider 不会被卸载。
     namespace fs = std::filesystem;
     const std::string& dir = config.model_dir;
     int dev = (config.device == Device::kCUDA) ? config.device_id : -1;
@@ -192,7 +145,10 @@ OrtCutie::SessionPtr OrtCutie::create_session(const std::string& onnx_path, int 
     cuda_opts.device_id = device_id;
     bundle->options.AppendExecutionProvider_CUDA(cuda_opts);
 
-    bundle->session = std::make_unique<Ort::Session>(env_, onnx_path.c_str(), bundle->options);
+    // 使用进程级永生 Env：多个 OrtCutie 实例共用同一 Env 创建各自 Session，
+    // provider 全程只加载一次、永不卸载，避免反复创建销毁实例时的卸载段错误。
+    bundle->session =
+        std::make_unique<Ort::Session>(ortcore::ort_global_env(), onnx_path.c_str(), bundle->options);
     bundle->collect_names();
     return bundle;
 }

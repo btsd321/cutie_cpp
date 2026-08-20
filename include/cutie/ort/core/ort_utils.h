@@ -11,6 +11,24 @@ namespace cutie
 namespace ortcore
 {
 
+/**
+ * @brief 获取进程级唯一的 ONNX Runtime 环境（Ort::Env），永生单例。
+ *
+ * Ort::Env 的析构会触发已加载 CUDA execution provider 的卸载。若每个推理实例
+ * 各自创建/销毁 Env，在同一个进程内反复创建/销毁 VideoSegmenter（约 3 次以上）
+ * 会在 provider 卸载阶段段错误（exit 139），与是否调用 close() 无关。
+ *
+ * 此处改为进程内共享同一个 Env，且**永不析构**（堆分配、故意泄漏）：
+ * - provider 全程只 dlopen 加载一次、运行期永不 dlclose 卸载；
+ * - 进程退出时由 OS 直接回收内存与已加载的 provider .so，不执行 ORT 析构逻辑，
+ *   从而同时规避运行期与退出期的 provider 卸载段错误。
+ *
+ * 多个并存的推理实例共用同一 Env 创建各自 Session，是 ORT 官方推荐用法。
+ *
+ * @return 对永生 Ort::Env 的引用。
+ */
+Ort::Env& ort_global_env();
+
 /// Create an Ort::Value tensor from a contiguous float buffer.
 Ort::Value create_tensor(const float* data, const std::vector<int64_t>& shape,
                          const Ort::MemoryInfo& memory_info);

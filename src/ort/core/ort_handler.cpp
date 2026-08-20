@@ -2,6 +2,7 @@
 #include <stdexcept>
 
 #include "cutie/ort/core/ort_handler.h"
+#include "cutie/ort/core/ort_utils.h"
 
 namespace cutie
 {
@@ -10,7 +11,7 @@ namespace ortcore
 
 BasicOrtHandler::BasicOrtHandler(const std::string& onnx_path, unsigned int num_threads,
                                  int device_id)
-    : ort_env(ORT_LOGGING_LEVEL_WARNING, "cutie"), num_threads(num_threads)
+    : num_threads(num_threads)
 {
     initialize_handler(onnx_path, device_id);
 }
@@ -28,7 +29,8 @@ void BasicOrtHandler::initialize_handler(const std::string& onnx_path, int devic
         session_options.AppendExecutionProvider_CUDA(cuda_options);
     }
 
-    ort_session = std::make_unique<Ort::Session>(ort_env, onnx_path.c_str(), session_options);
+    // 使用进程级永生 Env（ortcore::ort_global_env()），避免每实例创建/销毁 Env。
+    ort_session = std::make_unique<Ort::Session>(ort_global_env(), onnx_path.c_str(), session_options);
 
     Ort::AllocatorWithDefaultOptions allocator;
 
