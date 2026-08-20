@@ -82,3 +82,5 @@ graphify-out/
 raw/
 
 dist/
+
+.ref_project/
